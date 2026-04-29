@@ -81,30 +81,6 @@ bench restart
 
 ---
 
-## Структура репозитория
-
-```
-frappe_pulse/
-├── README.md              # основной (EN)
-├── README.ru.md           # этот файл
-├── pyproject.toml
-├── pulse_app/             # устанавливаемое Frappe-приложение
-│   ├── hooks.py
-│   ├── api/
-│   ├── core/router/
-│   ├── http/routes/
-│   ├── pulse/
-│   │   ├── workspace/
-│   │   ├── setup/
-│   │   └── doctype/
-│   └── public/js/
-└── docs/
-```
-
-В **`bench get-app`** указывают каталог **`pulse_app`** (или репозиторий, если он свёрнут в один app).
-
----
-
 ## Участие в проекте
 
 Issues и PR приветствуются. Держите изменения сфокусированными; при смене поведения или API обновляйте **docs**.

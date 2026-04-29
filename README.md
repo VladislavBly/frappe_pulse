@@ -79,30 +79,6 @@ If the tile is missing: run **`migrate`** again, **`bench restart`**, **`bench -
 
 ---
 
-## Project layout
-
-```
-frappe_pulse/
-├── README.md
-├── README.ru.md
-├── pyproject.toml
-├── pulse_app/                 # Frappe app package (install this)
-│   ├── hooks.py
-│   ├── api/
-│   ├── core/router/           # Custom REST router (Werkzeug)
-│   ├── http/routes/
-│   ├── pulse/
-│   │   ├── workspace/         # Desk workspace JSON
-│   │   ├── setup/             # Workspace sidebar + desktop icon sync
-│   │   └── doctype/
-│   └── public/js/             # Desk Socket.IO + User list helpers
-└── docs/
-```
-
-The installable unit is the **`pulse_app`** directory (standard Frappe layout).
-
----
-
 ## Contributing
 
 Issues and PRs are welcome. Please keep changes focused; match existing patterns (router, controllers, services). Add or update **docs** when behaviour or API surface changes.
