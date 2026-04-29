@@ -61,11 +61,7 @@ function pulse_refresh_desk_nav() {
 	el.textContent = text;
 }
 
-function pulse_mount_desk_nav() {
-	if (document.getElementById("pulse-desk-presence-pill")) {
-		pulse_refresh_desk_nav();
-		return;
-	}
+function pulse_create_desk_nav_pill() {
 	const pill = document.createElement("span");
 	pill.id = "pulse-desk-presence-pill";
 	pill.style.cssText =
@@ -73,27 +69,137 @@ function pulse_mount_desk_nav() {
 	pill.className = "indicator-pill no-indicator ellipsis";
 	pill.setAttribute("role", "status");
 	pill.setAttribute("aria-live", "polite");
+	pill.dataset.pulseNavPlacement = "";
+	return pill;
+}
 
-	const refs = [
-		() => document.querySelector(".navbar .dropdown-navbar-user"),
-		() => document.querySelector("header .dropdown-navbar-user"),
-		() => document.querySelector(".navbar-right .dropdown-navbar-user"),
+/** Точки вставки слева от меню пользователя — разметка Desk отличается по версиям / темам. */
+function pulse_find_navbar_anchor() {
+	const selectors = [
+		".navbar .dropdown-navbar-user",
+		"header .dropdown-navbar-user",
+		".navbar-right .dropdown-navbar-user",
+		".standard-navbar .dropdown-navbar-user",
+		'header nav .nav-item.dropdown[class*="user"]',
+		".navbar .nav-item.dropdown:last-child",
+		"header .navbar .nav-item.dropdown:last-child",
+		'[data-label="User Menu"]',
+		".navbar .dropdown-toggle[data-toggle="dropdown"]",
+		"#navbar-dropdown_avatar",
+		".navbar-right > .dropdown:last-child",
+		".navbar-nav.ms-auto .dropdown:last-child",
+		"nav.navbar .container-fluid .dropdown:last-child",
 	];
-	let placed = false;
-	for (let i = 0; i < refs.length; i++) {
-		const ref = refs[i]();
-		if (ref && ref.parentNode) {
-			ref.parentNode.insertBefore(pill, ref);
-			placed = true;
-			break;
+	for (let i = 0; i < selectors.length; i++) {
+		const el = document.querySelector(selectors[i]);
+		if (el && el.parentNode) {
+			return el;
 		}
 	}
+	return null;
+}
+
+function pulse_mount_desk_nav_fallback(pill) {
+	if (!pill || pill.parentNode) {
+		return;
+	}
+	pill.dataset.pulseNavPlacement = "fixed";
+	pill.style.cssText =
+		"position:fixed;bottom:max(16px,env(safe-area-inset-bottom));right:max(16px,env(safe-area-inset-right));" +
+		"z-index:2000;max-width:min(260px,calc(100vw - 32px));cursor:default;" +
+		"box-shadow:0 2px 12px rgba(0,0,0,.12);padding:6px 10px;border-radius:var(--border-radius-lg,8px);" +
+		"background:var(--card-bg,var(--fg-color,white));";
+	document.body.appendChild(pill);
 	pulse_refresh_desk_nav();
-	if (!placed) {
-		const n = (pulse._deskNavMountAttempts = (pulse._deskNavMountAttempts || 0) + 1);
-		if (n < 20) {
-			setTimeout(pulse_mount_desk_nav, 400);
+}
+
+function pulse_mount_desk_nav() {
+	let pill = document.getElementById("pulse-desk-presence-pill");
+	if (pill) {
+		pulse_refresh_desk_nav();
+		return;
+	}
+
+	const anchor = pulse_find_navbar_anchor();
+	if (anchor && anchor.parentNode) {
+		pill = pulse_create_desk_nav_pill();
+		pill.dataset.pulseNavPlacement = "navbar";
+		anchor.parentNode.insertBefore(pill, anchor);
+		pulse_refresh_desk_nav();
+		pulse._deskNavMountAttempts = 0;
+		return;
+	}
+
+	const n = (pulse._deskNavMountAttempts = (pulse._deskNavMountAttempts || 0) + 1);
+	if (n < 28) {
+		setTimeout(pulse_mount_desk_nav, 350);
+		return;
+	}
+	/* Шапка без подходящего якоря — показываем запасной виджет. */
+	pill = pulse_create_desk_nav_pill();
+	pulse_mount_desk_nav_fallback(pill);
+}
+
+/** Гарантированно показать индикатор (правый нижний угол), если навбар так и не подошёл. */
+function pulse_ensure_desk_nav_visible() {
+	if (document.getElementById("pulse-desk-presence-pill")) {
+		return;
+	}
+	const pill = pulse_create_desk_nav_pill();
+	pulse_mount_desk_nav_fallback(pill);
+}
+
+function pulse_try_move_nav_from_body_to_bar() {
+	const pill = document.getElementById("pulse-desk-presence-pill");
+	if (!pill || pill.dataset.pulseNavPlacement !== "fixed") {
+		return;
+	}
+	const anchor = pulse_find_navbar_anchor();
+	if (!anchor || !anchor.parentNode || pill.parentNode !== document.body) {
+		return;
+	}
+	pill.dataset.pulseNavPlacement = "navbar";
+	pill.style.cssText =
+		"margin-right:10px;vertical-align:middle;cursor:default;max-width:min(240px,42vw);";
+	anchor.parentNode.insertBefore(pill, anchor);
+	pulse_refresh_desk_nav();
+}
+
+function pulse_bind_nav_observers() {
+	if (pulse._deskNavObserverBound) {
+		return;
+	}
+	pulse._deskNavObserverBound = true;
+
+	function onRouteOrToolbar() {
+		if (!document.getElementById("pulse-desk-presence-pill")) {
+			pulse._deskNavMountAttempts = 0;
+			pulse_mount_desk_nav();
+			return;
 		}
+		pulse_try_move_nav_from_body_to_bar();
+	}
+
+	if (window.jQuery) {
+		jQuery(document).on("toolbar_setup", onRouteOrToolbar);
+	}
+	if (frappe.router && typeof frappe.router.on === "function") {
+		frappe.router.on("change", function () {
+			setTimeout(onRouteOrToolbar, 400);
+		});
+	}
+
+	let obsTimer = null;
+	try {
+		const mo = new MutationObserver(function () {
+			if (obsTimer) {
+				clearTimeout(obsTimer);
+			}
+			obsTimer = setTimeout(pulse_try_move_nav_from_body_to_bar, 250);
+		});
+		mo.observe(document.body, { childList: true, subtree: true });
+	} catch (e) {
+		/* ignore */
 	}
 }
 
@@ -247,10 +353,13 @@ pulse.setup_presence_realtime = function () {
 };
 
 frappe.ready(function () {
+	pulse_bind_nav_observers();
 	pulse_mount_desk_nav();
-	[120, 600, 2000].forEach(function (ms) {
+	[120, 400, 900, 2000, 4000].forEach(function (ms) {
 		setTimeout(pulse_mount_desk_nav, ms);
 	});
+	/* Если классы шапки нестандартные — не ждать конец цепочки ретраев. */
+	setTimeout(pulse_ensure_desk_nav_visible, 2600);
 	setInterval(pulse_refresh_desk_nav, 8000);
 
 	pulse._wait_desk_session_then_mark();
