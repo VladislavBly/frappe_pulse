@@ -75,6 +75,7 @@ def after_migrate():
 	ensure_pulse_user_custom_fields()
 	_ensure_pulse_user_field_in_list_view()
 	_sync_legacy_pulse_profile_into_user()
+	_remove_pulse_user_profile_doctype()
 	upgrade_pulse_workspace_if_legacy()
 	ensure_sidebar()
 
@@ -129,3 +130,24 @@ def _sync_legacy_pulse_profile_into_user():
 			frappe.db.set_value("User", u, values, update_modified=False)
 		except Exception:
 			continue
+
+
+def _remove_pulse_user_profile_doctype():
+	"""Удалить DocType Pulse User Profile из БД — присутствие только в полях User."""
+	if not frappe.db.exists("DocType", "Pulse User Profile"):
+		return
+	try:
+		if frappe.db.has_table("tabPulse User Profile"):
+			frappe.db.sql("DELETE FROM `tabPulse User Profile`")
+	except Exception:
+		frappe.log_error(
+			title="Pulse: clear tabPulse User Profile",
+			message=frappe.get_traceback(),
+		)
+	try:
+		frappe.delete_doc("DocType", "Pulse User Profile", force=1)
+	except Exception:
+		frappe.log_error(
+			title="Pulse: delete DocType Pulse User Profile",
+			message=frappe.get_traceback(),
+		)

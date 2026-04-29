@@ -50,7 +50,7 @@ bench --site erp.example.com migrate
 
 Подставьте своё имя сайта вместо `erp.example.com`.
 
-Миграции создают DocTypes (**Pulse Session Event**; **Pulse User Profile** остаётся в метаданных для старых БД), Custom Field на **User** (**Pulse last seen**, **Pulse presence source**), а также **Workspace «Pulse»** и плитку приложения на экране Desk (через **`add_to_apps_screen`** с **`logo`** и синхронизацию **Desktop Icon**, как в типичной настройке Frappe v15/v16).
+Миграции создают DocType **Pulse Session Event**, Custom Field на **User** (**Pulse last seen**, **Pulse presence source**), а также **Workspace «Pulse»** и плитку приложения на экране Desk (через **`add_to_apps_screen`** с **`logo`** и синхронизацию **Desktop Icon**, как в типичной настройке Frappe v15/v16). Устаревший **Pulse User Profile** при **`migrate`** удаляется из БД после переноса данных в **User**.
 
 После установки на экране приложений (**Apps**) должна появиться плитка **Pulse** с переходом на **`/app/pulse`** (ярлыки на журнал сессий и список **User**). Если плитки нет — **`bench build`**, **`migrate`**, **`bench restart`**, **`clear-cache`**, перелогин в Desk.
 

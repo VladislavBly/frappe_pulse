@@ -40,7 +40,7 @@ Pulse добавляет:
 | **REST** | `POST .../mark-online`, `mark-offline`, `GET .../presence/online`, `GET .../session-events`, whitelist-методы. |
 | **Realtime** | Подписка на **`pulse_presence`** (payload: `kind`, `user`, `service`, `online_users`). |
 | **Несколько фронтов** | Поле **`service`** — откуда пришло присутствие. |
-| **Данные** | Поля User (`pulse_last_seen_on`, `pulse_presence_source`); история в `Pulse Session Event`. DocType `Pulse User Profile` сервисом больше не заполняется. |
+| **Данные** | Расширение штатного **User** (`pulse_last_seen_on`, `pulse_presence_source`); журнал только в **Pulse Session Event**. |
 
 ---
 

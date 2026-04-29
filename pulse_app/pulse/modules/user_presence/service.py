@@ -1,7 +1,6 @@
 """Присутствие через realtime (publish_realtime), список онлайн, журнал сессий.
 
 Источник истины для «кто онлайн» — поля User (pulse_last_seen_on, pulse_presence_source).
-Отдельный DocType Pulse User Profile больше не используется сервисом (legacy в БД допустим).
 """
 
 from __future__ import annotations
