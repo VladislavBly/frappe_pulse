@@ -326,22 +326,7 @@ pulse.setup_presence_realtime = function () {
 
 	function on_pulse_presence(data) {
 		$(document).trigger("pulse_presence", data);
-		try {
-			const route = frappe.get_route && frappe.get_route();
-			const list_user =
-				route &&
-				route[0] === "List" &&
-				route[1] === "User" &&
-				window.cur_list &&
-				cur_list.doctype === "User";
-			if (list_user && cur_list.refresh) {
-				cur_list.refresh();
-			}
-			// Не вызывать cur_frm.reload_doc() на форме User — перезагрузка документа на каждое pulse_presence
-			// давала пустой/мигающий экран и гонки с отрисовкой полей.
-		} catch (e) {
-			// ignore
-		}
+		// Обновление списка User — в user_pulse.js (колонка pulse_last_seen_on). Здесь не вызывать cur_frm.reload_doc().
 	}
 
 	frappe.realtime.on("pulse_presence", on_pulse_presence);
