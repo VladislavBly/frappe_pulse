@@ -21,6 +21,10 @@ add_to_apps_screen = [
 after_install = "pulse_app.pulse.install.after_install"
 after_migrate = "pulse_app.pulse.install.after_migrate"
 
+# Журнал Pulse Session Event + присутствие при входе/выходе (раньше не было подключено).
+on_login = "pulse_app.pulse.auth_hooks.on_login"
+on_logout = "pulse_app.pulse.auth_hooks.on_logout"
+
 # Request routing (custom REST under /api/pulse/*)
 # ------------
 before_request = ["pulse_app.utils.api_routes.handle_api_routes"]
