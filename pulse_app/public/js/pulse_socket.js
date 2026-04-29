@@ -73,9 +73,17 @@ function pulse_create_desk_nav_pill() {
 	return pill;
 }
 
-/** Точки вставки слева от меню пользователя — разметка Desk отличается по версиям / темам. */
+/**
+ * Точки вставки рядом с меню пользователя.
+ * Frappe v16: на экране Desktop верхняя `.navbar` часто скрыта (`desktop.js` скрывает `.sticky-top > .navbar`),
+ * аватар и меню — у узла `.desktop-avatar` (раньше привычный `.dropdown-navbar-user` может отсутствовать).
+ */
 function pulse_find_navbar_anchor() {
 	const selectors = [
+		".desktop-avatar",
+		".sidebar-footer .desktop-avatar",
+		".workspace-sidebar .desktop-avatar",
+		".standard-sidebar .desktop-avatar",
 		".navbar .dropdown-navbar-user",
 		"header .dropdown-navbar-user",
 		".navbar-right .dropdown-navbar-user",
@@ -182,6 +190,10 @@ function pulse_bind_nav_observers() {
 
 	if (window.jQuery) {
 		jQuery(document).on("toolbar_setup", onRouteOrToolbar);
+		/* Frappe v16 DesktopPage триггерит после отрисовки экрана приложений / сайдбара с аватаром. */
+		jQuery(document).on("desktop_screen", function () {
+			setTimeout(onRouteOrToolbar, 150);
+		});
 	}
 	if (frappe.router && typeof frappe.router.on === "function") {
 		frappe.router.on("change", function () {
