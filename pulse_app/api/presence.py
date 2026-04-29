@@ -40,3 +40,44 @@ def mark_online(service=None):
 @frappe.whitelist()
 def mark_offline():
 	return pulse_service.mark_offline_presence()
+
+
+@frappe.whitelist()
+def desk_pulse_snapshot(users=None):
+	"""
+	Для Desk: вернуть ``pulse_last_seen_on`` / ``pulse_presence_source`` по списку имён User.
+
+	``users`` — JSON-массив строк или одиночная строка (frappe.call из JS).
+	Ограничение: не более 300 имён за запрос.
+	"""
+	if frappe.session.user == "Guest":
+		frappe.throw(frappe._("Not permitted"), frappe.PermissionError)
+
+	if users in (None, ""):
+		return []
+
+	if isinstance(users, (list, tuple)):
+		raw = list(users)
+	elif isinstance(users, str):
+		try:
+			raw = json.loads(users)
+		except json.JSONDecodeError:
+			raw = [users]
+	else:
+		frappe.throw(frappe._("Invalid users"))
+
+	if not isinstance(raw, (list, tuple)):
+		raw = [raw]
+
+	names = [u for u in raw if u and isinstance(u, str)][:300]
+	if not names:
+		return []
+
+	cols = frappe.db.get_table_columns("User")
+	fields = ["name"]
+	if "pulse_last_seen_on" in cols:
+		fields.append("pulse_last_seen_on")
+	if "pulse_presence_source" in cols:
+		fields.append("pulse_presence_source")
+
+	return frappe.get_all("User", filters={"name": ("in", names)}, fields=fields)

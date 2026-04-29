@@ -1,12 +1,11 @@
 // User list + form: Pulse Online / Away / No data (окно 120 с — как ONLINE_WINDOW_SEC в service.py).
 //
-// В Frappe колонка Subject (Полное имя) не всегда проходит через formatters так же, как обычные поля
-// (см. list_view.js get_subject_element / get_subject_text). Поэтому бейдж у имени рисуем
-// дополнительно после render_list — это работает во всех версиях Desk с классическим ListView.
+// Строки списка User с сервера часто приходят без кастомных полей — бейджи рисуем через whitelist API
+// pulse_app.api.presence.desk_pulse_snapshot по видимым именам (.list-row-checkbox[data-name]).
 
 (function () {
 	const PULSE_ONLINE_WINDOW_SEC = 120;
-	const MERGE_REV = 4;
+	const MERGE_REV = 5;
 
 	function pulse_presence_badge_html(doc) {
 		if (!doc || !doc.pulse_last_seen_on) {
@@ -65,40 +64,82 @@
 		}
 	}
 
-	/** После отрисовки строк — бейдж рядом с темой (имя), не зависит от formatters Subject. */
-	function pulse_paint_user_rows(listview) {
-		if (!listview || listview.doctype !== "User" || !listview.$result || !listview.data) {
+	/** Запрос полей Pulse по именам и отрисовка бейджей в контейнере списка. */
+	function pulse_paint_badges_for_container($result) {
+		if (!$result || !$result.length) {
 			return;
 		}
 		const $ = window.jQuery;
-		listview.$result.find(".pulse-user-badge-slot").remove();
+		const names = [];
+		$result.find(".list-row-checkbox[data-name]").each(function () {
+			const n = $(this).attr("data-name");
+			if (n) {
+				names.push(n);
+			}
+		});
+		const uniq = [...new Set(names)];
+		if (!uniq.length) {
+			return;
+		}
+		frappe.call({
+			method: "pulse_app.api.presence.desk_pulse_snapshot",
+			args: { users: JSON.stringify(uniq) },
+			freeze: false,
+			callback: function (r) {
+				const rows = r.message || [];
+				const map = {};
+				rows.forEach(function (row) {
+					map[row.name] = row;
+				});
+				$result.find(".pulse-user-badge-slot").remove();
+				uniq.forEach(function (name) {
+					const doc = map[name] || { name: name };
+					const esc = name.replace(/'/g, "\\'");
+					const $cb = $result.find(`.list-row-checkbox[data-name='${esc}']`);
+					if (!$cb.length) {
+						return;
+					}
+					const $row = $cb.closest(".list-row-container").find(".list-row").first();
+					if (!$row.length) {
+						return;
+					}
+					let $slot = $row.find(".list-subject").first();
+					if (!$slot.length) {
+						$slot = $row.find(".level-left .list-row-col").first();
+					}
+					if (!$slot.length) {
+						return;
+					}
+					const html = pulse_presence_badge_html(doc);
+					$slot.append(
+						`<span class="pulse-user-badge-slot" style="margin-left:6px;display:inline-block;vertical-align:middle;">${html}</span>`
+					);
+				});
+			},
+		});
+	}
 
-		for (let i = 0; i < listview.data.length; i++) {
-			const doc = listview.data[i];
-			const name = doc.name;
-			if (!name) {
-				continue;
-			}
-			const esc = name.replace(/'/g, "\\'");
-			const $cb = listview.$result.find(`.list-row-checkbox[data-name='${esc}']`);
-			if (!$cb.length) {
-				continue;
-			}
-			const $row = $cb.closest(".list-row-container").find(".list-row").first();
-			if (!$row.length) {
-				continue;
-			}
-			let $slot = $row.find(".list-subject").first();
-			if (!$slot.length) {
-				$slot = $row.find(".level-left .list-row-col").first();
-			}
-			if (!$slot.length) {
-				continue;
-			}
-			const html = pulse_presence_badge_html(doc);
-			$slot.append(
-				`<span class="pulse-user-badge-slot" style="margin-left:6px;display:inline-block;vertical-align:middle;">${html}</span>`
-			);
+	function pulse_paint_user_list_from_api(listview) {
+		if (listview && listview.doctype === "User" && listview.$result) {
+			pulse_paint_badges_for_container(listview.$result);
+			return;
+		}
+		pulse_try_repaint_user_list_dom();
+	}
+
+	function pulse_try_repaint_user_list_dom() {
+		const r = frappe.get_route && frappe.get_route();
+		if (!r || r[0] !== "List" || r[1] !== "User") {
+			return;
+		}
+		const $ = window.jQuery;
+		if (window.cur_list && cur_list.doctype === "User" && cur_list.$result && cur_list.$result.length) {
+			pulse_paint_badges_for_container(cur_list.$result);
+			return;
+		}
+		const $result = $(".layout-main .result, .frappe-list .result, .page-container .result").first();
+		if ($result.length) {
+			pulse_paint_badges_for_container($result);
 		}
 	}
 
@@ -116,11 +157,11 @@
 			const ret = orig.apply(this, arguments);
 			try {
 				if (this.doctype === "User") {
-					pulse_paint_user_rows(this);
+					pulse_paint_user_list_from_api(this);
 				}
 			} catch (e) {
 				if (window.console && console.error) {
-					console.error("pulse_paint_user_rows", e);
+					console.error("pulse_paint_user_list_from_api", e);
 				}
 			}
 			return ret;
@@ -159,7 +200,6 @@
 			new Set([...(s.add_fields || []), "pulse_last_seen_on", "pulse_presence_source"])
 		);
 
-		// Subject колонку красит pulse_paint_user_rows; здесь — только отдельное поле в таблице.
 		s.formatters = Object.assign({}, captured, {
 			pulse_last_seen_on(value, df, doc) {
 				if (captured.pulse_last_seen_on) {
@@ -186,7 +226,7 @@
 					frappe.msgprint({
 						title: __("Pulse"),
 						message: __(
-							"Green/Away next to the name is Pulse (Desk + Socket.IO). «No data» means the field is empty or realtime is off. You can add the «Pulse last seen» column from the list menu."
+							"Badges load via API if list rows hide custom fields. «No data» = empty field or realtime off."
 						),
 						indicator: "blue",
 					});
@@ -195,7 +235,7 @@
 				/* ignore */
 			}
 			try {
-				pulse_paint_user_rows(listview);
+				pulse_paint_user_list_from_api(listview);
 			} catch (e2) {
 				/* ignore */
 			}
@@ -213,26 +253,35 @@
 		merge_pulse_user_list_settings();
 		pulse_try_install_dom_patch();
 		refresh_user_list_if_open();
+
 		try {
-			if (window.cur_list && cur_list.doctype === "User") {
-				pulse_paint_user_rows(cur_list);
-			}
+			pulse_try_repaint_user_list_dom();
 		} catch (e) {
 			/* ignore */
 		}
+
 		[50, 400, 1200].forEach(function (ms) {
 			setTimeout(function () {
 				merge_pulse_user_list_settings();
 				refresh_user_list_if_open();
 				try {
-					if (window.cur_list && cur_list.doctype === "User") {
-						pulse_paint_user_rows(cur_list);
-					}
+					pulse_try_repaint_user_list_dom();
 				} catch (e) {
 					/* ignore */
 				}
 			}, ms);
 		});
+
+		window.setInterval(function () {
+			try {
+				const rt = frappe.get_route && frappe.get_route();
+				if (rt && rt[0] === "List" && rt[1] === "User") {
+					pulse_try_repaint_user_list_dom();
+				}
+			} catch (e) {
+				/* ignore */
+			}
+		}, 4000);
 	});
 
 	if (frappe.router && typeof frappe.router.on === "function") {
@@ -242,9 +291,7 @@
 					merge_pulse_user_list_settings();
 					refresh_user_list_if_open();
 					try {
-						if (window.cur_list && cur_list.doctype === "User") {
-							pulse_paint_user_rows(cur_list);
-						}
+						pulse_try_repaint_user_list_dom();
 					} catch (e) {
 						/* ignore */
 					}
@@ -252,9 +299,18 @@
 		});
 	}
 
-	function pulse_inject_user_form_sidebar_badge(frm) {
+	window.jQuery(document).on("pulse_presence", function () {
+		try {
+			pulse_try_repaint_user_list_dom();
+		} catch (e) {
+			/* ignore */
+		}
+	});
+
+	function pulse_inject_user_form_sidebar_badge(frm, doc) {
 		const $ = window.jQuery;
-		const badge = pulse_presence_badge_html(frm.doc);
+		doc = doc || frm.doc;
+		const badge = pulse_presence_badge_html(doc);
 		const label = frappe.utils.escape_html(__("Pulse presence"));
 
 		const block = `
@@ -294,8 +350,9 @@
 		return false;
 	}
 
-	function pulse_inject_user_form_title_fallback(frm) {
-		const badge = pulse_presence_badge_html(frm.doc);
+	function pulse_inject_user_form_title_fallback(frm, doc) {
+		doc = doc || frm.doc;
+		const badge = pulse_presence_badge_html(doc);
 		const $area =
 			frm.page.wrapper.find(".page-head .title-area").first().length
 				? frm.page.wrapper.find(".page-head .title-area").first()
@@ -314,24 +371,54 @@
 				frm.wrapper.find(".pulse-form-presence-wrap").remove();
 				frm.page.wrapper.find(".pulse-form-presence").remove();
 
-				let placed = false;
-				function attempt(n) {
-					frm.wrapper.find(".pulse-form-presence-wrap").remove();
-					if (pulse_inject_user_form_sidebar_badge(frm)) {
-						placed = true;
-						return;
-					}
-					if (n < 5) {
-						setTimeout(function () {
-							if (!placed) {
-								attempt(n + 1);
+				frappe.call({
+					method: "pulse_app.api.presence.desk_pulse_snapshot",
+					args: { users: JSON.stringify([frm.doc.name]) },
+					freeze: false,
+					callback: function (r) {
+						const row = (r.message || [])[0];
+						const merged = row ? Object.assign({}, frm.doc, row) : frm.doc;
+
+						let placed = false;
+						function attempt(n) {
+							frm.wrapper.find(".pulse-form-presence-wrap").remove();
+							if (pulse_inject_user_form_sidebar_badge(frm, merged)) {
+								placed = true;
+								return;
 							}
-						}, 100 * (n + 1));
-					} else if (!placed) {
-						pulse_inject_user_form_title_fallback(frm);
-					}
-				}
-				attempt(0);
+							if (n < 6) {
+								setTimeout(function () {
+									if (!placed) {
+										attempt(n + 1);
+									}
+								}, 120 * (n + 1));
+							} else if (!placed) {
+								pulse_inject_user_form_title_fallback(frm, merged);
+							}
+						}
+						attempt(0);
+					},
+					error: function () {
+						let placed = false;
+						function attempt(n) {
+							frm.wrapper.find(".pulse-form-presence-wrap").remove();
+							if (pulse_inject_user_form_sidebar_badge(frm, frm.doc)) {
+								placed = true;
+								return;
+							}
+							if (n < 3) {
+								setTimeout(function () {
+									if (!placed) {
+										attempt(n + 1);
+									}
+								}, 150);
+							} else if (!placed) {
+								pulse_inject_user_form_title_fallback(frm, frm.doc);
+							}
+						}
+						attempt(0);
+					},
+				});
 			},
 		});
 	}
