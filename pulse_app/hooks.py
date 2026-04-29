@@ -25,11 +25,14 @@ after_migrate = "pulse_app.pulse.install.after_migrate"
 # ------------
 before_request = ["pulse_app.utils.api_routes.handle_api_routes"]
 
-# Desk: подключение Socket.IO → pulse_socket.js → pulse_app.api.presence.mark_online → publish_realtime
+# Desk: Socket.IO + глобально user_pulse.js (иначе другие приложения перезаписывают listview_settings User)
 # ------------
-app_include_js = "/assets/pulse_app/js/pulse_socket.js"
+app_include_js = [
+	"/assets/pulse_app/js/pulse_socket.js",
+	"/assets/pulse_app/js/user_pulse.js",
+]
 
-# User: список (бейдж у имени + колонка) и форма — нужны оба хука
+# User: дублирующая подгрузка при открытии формы/списка
 # ------------
 doctype_js = {"User": "public/js/user_pulse.js"}
 doctype_list_js = {"User": "public/js/user_pulse.js"}
