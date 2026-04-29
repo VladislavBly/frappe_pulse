@@ -162,34 +162,4 @@ frappe.ready(function () {
 	setInterval(function () {
 		pulse.http_mark_online();
 	}, 25000);
-
-	// Вкладка в фоне режет setInterval — после возврата на Desk снова помечаем онлайн.
-	document.addEventListener("visibilitychange", function () {
-		if (document.visibilityState !== "visible") {
-			return;
-		}
-		if (!frappe.session || frappe.session.user === "Guest") {
-			return;
-		}
-		pulse.http_mark_online();
-	});
-	var focusPing =
-		frappe.utils.debounce &&
-		frappe.utils.debounce(function () {
-			if (!frappe.session || frappe.session.user === "Guest") {
-				return;
-			}
-			pulse.http_mark_online();
-		}, 600);
-	window.addEventListener(
-		"focus",
-		function () {
-			if (focusPing) {
-				focusPing();
-			} else {
-				pulse.http_mark_online();
-			}
-		},
-		true
-	);
 });
