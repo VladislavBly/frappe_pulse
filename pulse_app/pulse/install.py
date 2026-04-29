@@ -145,7 +145,7 @@ def _remove_pulse_user_profile_doctype():
 			message=frappe.get_traceback(),
 		)
 	try:
-		frappe.delete_doc("DocType", "Pulse User Profile", force=1)
+		frappe.delete_doc("DocType", "Pulse User Profile", force=1, ignore_permissions=True)
 	except Exception:
 		frappe.log_error(
 			title="Pulse: delete DocType Pulse User Profile",
