@@ -5,7 +5,8 @@
 
 (function () {
 	const PULSE_ONLINE_WINDOW_SEC = 120;
-	const MERGE_REV = 6;
+	const MERGE_REV = 7;
+	window.__pulse_app_user_js = "0.1.2";
 
 	function pulse_presence_badge_html(doc) {
 		if (!doc || !doc.pulse_last_seen_on) {
@@ -42,7 +43,7 @@
 		}
 	}
 
-	/** Frappe v16+: основная область формы — заметная полоска сразу под page-head. */
+	/** Форма User: полоска под page-head (v15/v16; маршрут может быть user/… а не Form/User). */
 	function pulse_inject_user_form_main_banner(frm, doc) {
 		const $ = window.jQuery;
 		doc = doc || frm.doc;
@@ -57,19 +58,39 @@
 				</div>
 			</div>`;
 
-		const $main = frm.wrapper.find(".layout-main-section").first();
-		if (!$main.length) {
-			return false;
+		let $scope = frm.wrapper;
+		if (frm.page && frm.page.wrapper && frm.page.wrapper.length) {
+			$scope = $scope.add(frm.page.wrapper);
 		}
-		const $head = $main.children(".page-head").first().length
-			? $main.children(".page-head").first()
-			: $main.find(".page-head").first();
+		let $head = $scope.find(".page-head").first();
+		if (!$head.length && frm.page && frm.page.page_container) {
+			$head = frm.page.page_container.find(".page-head").first();
+		}
 		if ($head.length) {
-			$head.after(block);
+			$head.first().after(block);
 			return true;
 		}
-		$main.prepend(block);
-		return true;
+
+		const $main = frm.wrapper
+			.find(".layout-main-section, .layout-main .layout-main-section, .form-page, .form-layout")
+			.first();
+		if ($main.length) {
+			const $innerHead = $main.find(".page-head").first();
+			if ($innerHead.length) {
+				$innerHead.after(block);
+				return true;
+			}
+			$main.prepend(block);
+			return true;
+		}
+
+		const $body = frm.wrapper.find(".page-body, .form-column, .main-section").first();
+		if ($body.length) {
+			$body.prepend(block);
+			return true;
+		}
+
+		return false;
 	}
 
 	function pulse_inject_user_form_sidebar_badge(frm, doc) {
@@ -147,8 +168,7 @@
 
 	function pulse_refresh_open_user_form_presence() {
 		try {
-			const r = frappe.get_route && frappe.get_route();
-			if (!r || r[0] !== "Form" || r[1] !== "User" || !window.cur_frm || !cur_frm.doc || !cur_frm.doc.name) {
+			if (!window.cur_frm || cur_frm.doctype !== "User" || !cur_frm.doc || !cur_frm.doc.name) {
 				return;
 			}
 			const frm = cur_frm;
@@ -182,10 +202,21 @@
 
 	function refresh_user_list_if_open() {
 		try {
-			const r = frappe.get_route && frappe.get_route();
-			if (r && r[0] === "List" && r[1] === "User" && window.cur_list && cur_list.doctype === "User") {
-				cur_list.refresh && cur_list.refresh();
+			/* v16 Workspace: маршрут не всегда ["List","User"]; достаточно активного listview. */
+			if (window.cur_list && cur_list.doctype === "User" && cur_list.refresh) {
+				cur_list.refresh();
 			}
+		} catch (e) {
+			/* ignore */
+		}
+	}
+
+	function pulse_strip_legacy_user_list_badges(listview) {
+		try {
+			if (!listview || listview.doctype !== "User" || !listview.$result || !listview.$result.length) {
+				return;
+			}
+			listview.$result.find(".pulse-user-badge-slot").remove();
 		} catch (e) {
 			/* ignore */
 		}
@@ -212,6 +243,9 @@
 
 		s.formatters = Object.assign({}, captured, {
 			pulse_last_seen_on(value, df, doc) {
+				if (df && df.fieldname && df.fieldname !== "pulse_last_seen_on") {
+					return value;
+				}
 				if (captured.pulse_last_seen_on) {
 					return captured.pulse_last_seen_on(value, df, doc);
 				}
@@ -235,6 +269,32 @@
 				});
 			} catch (e) {
 				/* ignore */
+			}
+			if (listview.doctype === "User") {
+				const strip = function () {
+					pulse_strip_legacy_user_list_badges(listview);
+				};
+				strip();
+				[80, 400, 1000].forEach(function (ms) {
+					setTimeout(strip, ms);
+				});
+				const origRefresh = listview.refresh;
+				if (typeof origRefresh === "function" && !listview.__pulse_strip_refresh_bound) {
+					listview.__pulse_strip_refresh_bound = true;
+					listview.refresh = function () {
+						const out = origRefresh.apply(this, arguments);
+						try {
+							if (out && typeof out.then === "function") {
+								out.then(strip);
+							} else {
+								setTimeout(strip, 0);
+							}
+						} catch (e2) {
+							setTimeout(strip, 0);
+						}
+						return out;
+					};
+				}
 			}
 		};
 
