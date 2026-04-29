@@ -185,3 +185,45 @@
 	border: 1px dashed var(--border-color);
 	background: var(--control-bg) !important;
 }
+
+.pulse-online-live-feed-card .pulse-online-card-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem;
+	flex-wrap: wrap;
+}
+
+.pulse-online-live-feed-list {
+	list-style: none;
+	margin: 0;
+	padding: 0.5rem 1rem 1rem;
+	max-height: 280px;
+	overflow-y: auto;
+	font-family: ui-monospace, monospace;
+	font-size: var(--text-xs);
+	line-height: 1.45;
+}
+
+.pulse-online-live-feed-item {
+	padding: 0.35rem 0;
+	border-bottom: 1px solid var(--border-color);
+}
+
+.pulse-online-live-feed-item:last-child {
+	border-bottom: none;
+}
+
+.pulse-online-live-feed-empty {
+	padding: 1rem !important;
+	list-style: none;
+	text-align: center;
+	font-family: inherit;
+}
+
+.pulse-online-live-feed-hint {
+	padding: 0 1rem 0.75rem;
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	margin: 0;
+}

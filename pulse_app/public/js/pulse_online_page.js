@@ -17,6 +17,97 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 	let lastRefreshAt = null;
 	let loadSeq = 0;
 
+	const debouncedPresenceLoad =
+		frappe.utils.debounce &&
+		frappe.utils.debounce(function () {
+			load(true);
+		}, 380);
+
+	function feedStorageKey() {
+		return "pulse_live_activity_" + (frappe.session.user || "guest");
+	}
+
+	function appendLiveFeedEntry(data) {
+		try {
+			data = data || {};
+			const key = feedStorageKey();
+			let arr = [];
+			try {
+				arr = JSON.parse(sessionStorage.getItem(key) || "[]");
+			} catch (e) {
+				arr = [];
+			}
+			if (!Array.isArray(arr)) {
+				arr = [];
+			}
+			arr.unshift({
+				ts: new Date().toISOString(),
+				kind: data.kind || "pulse_presence",
+				user: data.user || "",
+				service: data.service || "",
+			});
+			sessionStorage.setItem(key, JSON.stringify(arr.slice(0, 80)));
+		} catch (e) {
+			/* quota / private mode */
+		}
+	}
+
+	function formatFeedLine(row) {
+		const t = row.ts
+			? new Date(row.ts).toLocaleTimeString(undefined, { hour12: false })
+			: "";
+		const u = row.user || "—";
+		const svc = row.service ? " · " + row.service : "";
+		const k = row.kind || "";
+		let msg = "";
+		if (k === "offline") {
+			msg = t + " · " + __("Offline") + " · " + u;
+		} else if (k === "presence_update") {
+			msg = t + " · " + __("Presence") + " · " + u + svc;
+		} else {
+			msg = t + " · " + k + " · " + u + svc;
+		}
+		return pulse_online_escape(msg);
+	}
+
+	function paintLiveFeed($root) {
+		const $ul = $root.find(".pulse-online-live-feed-list");
+		if (!$ul.length) {
+			return;
+		}
+		let arr = [];
+		try {
+			arr = JSON.parse(sessionStorage.getItem(feedStorageKey()) || "[]");
+		} catch (e) {
+			arr = [];
+		}
+		if (!Array.isArray(arr)) {
+			arr = [];
+		}
+		let html = "";
+		if (!arr.length) {
+			html =
+				'<li class="pulse-online-live-feed-empty text-muted">' +
+				pulse_online_escape(__("Waiting for pulse_presence events…")) +
+				"</li>";
+		} else {
+			arr.forEach(function (row) {
+				html += '<li class="pulse-online-live-feed-item">' + formatFeedLine(row) + "</li>";
+			});
+		}
+		$ul.html(html);
+	}
+
+	function clearLiveFeed() {
+		try {
+			sessionStorage.removeItem(feedStorageKey());
+		} catch (e) {
+			/* ignore */
+		}
+		paintLiveFeed($main);
+		frappe.show_alert({ message: __("Live feed cleared"), indicator: "blue" });
+	}
+
 	function prevHandlerCleanup() {
 		const prev = frappe.pages["pulse-online"]._pulseRtHandler;
 		if (!prev) {
@@ -27,25 +118,21 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 		} catch (e) {
 			/* ignore */
 		}
-		$(document).off("pulse_presence.pulseOnlinePage", prev);
 		frappe.pages["pulse-online"]._pulseRtHandler = null;
 	}
 
 	function bindRealtime() {
 		prevHandlerCleanup();
-		var fn;
-		if (frappe.utils.debounce) {
-			fn = frappe.utils.debounce(function () {
+		function onPresence(data) {
+			appendLiveFeedEntry(data || {});
+			if (debouncedPresenceLoad) {
+				debouncedPresenceLoad();
+			} else {
 				load(true);
-			}, 380);
-		} else {
-			fn = function () {
-				load(true);
-			};
+			}
 		}
-		frappe.pages["pulse-online"]._pulseRtHandler = fn;
-		frappe.realtime.on("pulse_presence", fn);
-		$(document).on("pulse_presence.pulseOnlinePage", fn);
+		frappe.pages["pulse-online"]._pulseRtHandler = onPresence;
+		frappe.realtime.on("pulse_presence", onPresence);
 	}
 
 	function flashToolbar() {
@@ -216,6 +303,22 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 			"</div>" +
 			"</div>" +
 			"</div>" +
+			'<div class="pulse-online-card pulse-online-live-feed-card">' +
+			'<div class="pulse-online-card-head">' +
+			"<span><i class=\"fa fa-bolt fa-fw\"></i> " +
+			__("Realtime activity") +
+			"</span>" +
+			'<button type="button" class="btn btn-xs btn-default pulse-online-clear-feed">' +
+			__("Clear") +
+			"</button>" +
+			"</div>" +
+			'<p class="pulse-online-live-feed-hint">' +
+			pulse_online_escape(
+				__("Live stream of pulse_presence from Socket.IO (stored in this browser until cleared).")
+			) +
+			"</p>" +
+			'<ul class="pulse-online-live-feed-list"></ul>' +
+			"</div>" +
 			'<div class="alert alert-secondary pulse-online-conn mb-3">' +
 			"<strong>" +
 			__("API") +
@@ -252,7 +355,7 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 			'<div class="pulse-online-card">' +
 			'<div class="pulse-online-card-head">' +
 			'<i class="fa fa-history fa-fw"></i> ' +
-			__("Session activity") +
+			__("Login / Logout history") +
 			"</div>" +
 			'<div class="pulse-online-card-body">' +
 			'<p class="text-muted small px-3 pt-2 mb-2">' +
@@ -310,6 +413,11 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 				frappe.set_route("Form", "Pulse Session Event", name);
 			}
 		});
+		$main.on("click.pulseOnline", ".pulse-online-clear-feed", function (e) {
+			e.preventDefault();
+			clearLiveFeed();
+		});
+		paintLiveFeed($main);
 	}
 
 	function load(fromRealtime) {
@@ -367,6 +475,7 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 		load(false);
 	});
 	page.add_inner_button(__("Ping"), ping);
+	page.add_inner_button(__("Clear live feed"), clearLiveFeed);
 
 	bindRealtime();
 
@@ -401,7 +510,6 @@ frappe.pages["pulse-online"].on_page_hide = function () {
 		} catch (e) {
 			/* ignore */
 		}
-		$(document).off("pulse_presence.pulseOnlinePage", h);
 		frappe.pages["pulse-online"]._pulseRtHandler = null;
 	}
 };

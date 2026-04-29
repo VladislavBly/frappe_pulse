@@ -150,7 +150,7 @@ def pulse_online_dashboard():
 		"online_window_sec": _ONLINE_WINDOW_SEC,
 		"server_time": now_datetime().isoformat(),
 		"current_user": frappe.session.user,
-		"session_events": _session_events_for_pulse_page(40),
+		"session_events": _session_events_for_pulse_page(80),
 		"session_events_scope": "all"
 		if ("System Manager" in frappe.get_roles(frappe.session.user))
 		else "mine",
