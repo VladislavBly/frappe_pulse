@@ -1,28 +1,27 @@
 {
-  "app": "pulse_app",
-  "content": "[{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pulse Session Event\",\"col\":\"4\"}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"User\",\"col\":\"4\"}}]",
-  "doctype": "Workspace",
-  "icon": "activity",
-  "is_hidden": 0,
-  "label": "Pulse",
-  "links": [],
-  "module": "Pulse",
-  "name": "Pulse",
-  "public": 1,
-  "sequence_id": 92,
-  "shortcuts": [
-    {
-      "doc_view": "List",
-      "label": "Pulse Session Event",
-      "link_to": "Pulse Session Event",
-      "type": "DocType"
-    },
-    {
-      "doc_view": "List",
-      "label": "User",
-      "link_to": "User",
-      "type": "DocType"
-    }
-  ],
-  "title": "Pulse"
+ "app": "pulse_app",
+ "content": "[{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pulse Session Event\",\"col\":\"4\"}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pulse — онлайн\",\"col\":\"4\"}}]",
+ "doctype": "Workspace",
+ "icon": "activity",
+ "is_hidden": 0,
+ "label": "Pulse",
+ "links": [],
+ "module": "Pulse",
+ "name": "Pulse",
+ "public": 1,
+ "sequence_id": 92,
+ "shortcuts": [
+  {
+   "doc_view": "List",
+   "label": "Pulse Session Event",
+   "link_to": "Pulse Session Event",
+   "type": "DocType"
+  },
+  {
+   "label": "Pulse — онлайн",
+   "link_to": "pulse-online",
+   "type": "Page"
+  }
+ ],
+ "title": "Pulse"
 }

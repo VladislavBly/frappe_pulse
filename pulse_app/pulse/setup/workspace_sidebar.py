@@ -13,16 +13,23 @@ WORKSPACE_NAME = "Pulse"
 
 
 def sanitize_pulse_workspace_payload(data: dict) -> dict:
-	"""Ярлыки только на реально существующие DocType (нет Pulse User Profile / migrate порядок)."""
+	"""Ярлыки только на существующие DocType или Page (migrate-порядок)."""
 	shortcuts = []
 	for row in data.get("shortcuts") or []:
 		lt = row.get("link_to")
-		if lt and frappe.db.exists("DocType", lt):
+		t = row.get("type") or "DocType"
+		if not lt:
+			continue
+		if t == "DocType" and frappe.db.exists("DocType", lt):
+			shortcuts.append(row)
+		elif t == "Page" and frappe.db.exists("Page", lt):
 			shortcuts.append(row)
 	if not shortcuts:
 		shortcuts = [
-			{"doc_view": "List", "label": "User", "link_to": "User", "type": "DocType"},
+			{"doc_view": "List", "label": "Pulse Session Event", "link_to": "Pulse Session Event", "type": "DocType"},
 		]
+		if frappe.db.exists("Page", "pulse-online"):
+			shortcuts.append({"label": "Pulse — онлайн", "link_to": "pulse-online", "type": "Page"})
 	data["shortcuts"] = shortcuts
 	items = []
 	for s in shortcuts:
@@ -114,6 +121,32 @@ def ensure_pulse_workspace_record() -> None:
 		doc.insert(ignore_permissions=True)
 	except Exception:
 		frappe.log_error(title="pulse_app: ensure_pulse_workspace_record", message=frappe.get_traceback())
+
+
+def sync_pulse_workspace_shortcuts_from_app() -> None:
+	"""Обновить ярлыки Workspace Pulse из pulse.json (новая страница pulse-online и т.д.)."""
+	if not frappe.db.exists("Workspace", WORKSPACE_NAME):
+		return
+	path = os.path.join(
+		frappe.get_app_path("pulse_app", "pulse", "workspace", "pulse"),
+		"pulse.json",
+	)
+	if not os.path.isfile(path):
+		return
+	try:
+		with open(path, encoding="utf-8") as f:
+			data = json.load(f)
+		if data.get("doctype") != "Workspace":
+			return
+		data = sanitize_pulse_workspace_payload(data)
+		ws = frappe.get_doc("Workspace", WORKSPACE_NAME)
+		ws.shortcuts = []
+		for row in data.get("shortcuts") or []:
+			ws.append("shortcuts", row)
+		ws.content = data.get("content")
+		ws.save(ignore_permissions=True)
+	except Exception:
+		frappe.log_error(title="pulse_app: sync_pulse_workspace_shortcuts_from_app", message=frappe.get_traceback())
 
 
 def _sync_desktop_icons_after_sidebar() -> None:
@@ -215,8 +248,14 @@ def _build_sidebar_rows() -> list[dict]:
 	section("Pulse")
 	if frappe.db.exists("DocType", "Pulse Session Event"):
 		doctype_link("Pulse Session Event", "Pulse Session Event")
-
-	section("Users")
-	doctype_link("User", "User")
+	if frappe.db.exists("Page", "pulse-online"):
+		rows.append(
+			{
+				"type": "Link",
+				"label": "Pulse — онлайн",
+				"link_type": "Page",
+				"link_to": "pulse-online",
+			}
+		)
 
 	return rows

@@ -8,6 +8,8 @@ import frappe
 
 from pulse_app.pulse.modules.user_presence import service as pulse_service
 
+_ONLINE_WINDOW_SEC = getattr(pulse_service, "ONLINE_WINDOW_SEC", 120)
+
 
 def _extract_service_from_request():
 	"""GET/POST form, JSON body или frappe.call args."""
@@ -81,3 +83,33 @@ def desk_pulse_snapshot(users=None):
 		fields.append("pulse_presence_source")
 
 	return frappe.get_all("User", filters={"name": ("in", names)}, fields=fields)
+
+
+@frappe.whitelist()
+def pulse_online_dashboard():
+	"""
+	Страница «Pulse — онлайн»: список пользователей в окне онлайна + метаданные для UI.
+	"""
+	if frappe.session.user == "Guest":
+		frappe.throw(frappe._("Not permitted"), frappe.PermissionError)
+
+	from frappe.utils import now_datetime
+
+	rows = pulse_service.list_online_users()
+	out = []
+	for row in rows:
+		ls = row.get("last_seen_on")
+		out.append(
+			{
+				"user": row.get("user"),
+				"last_seen_on": ls.isoformat() if hasattr(ls, "isoformat") else ls,
+				"service": row.get("service"),
+			}
+		)
+
+	return {
+		"online_users": out,
+		"online_window_sec": _ONLINE_WINDOW_SEC,
+		"server_time": now_datetime().isoformat(),
+		"current_user": frappe.session.user,
+	}

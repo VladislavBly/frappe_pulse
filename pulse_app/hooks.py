@@ -25,13 +25,11 @@ after_migrate = "pulse_app.pulse.install.after_migrate"
 # ------------
 before_request = ["pulse_app.utils.api_routes.handle_api_routes"]
 
-# Desk: Socket.IO + глобально user_pulse.js.
-# На проде желательно держать pulse_app последним в sites/apps.txt — иначе ERPNext снова перезапишет
-# frappe.listview_settings.User до загрузки скрипта (патч ListView в user_pulse.js это компенсирует).
+# Desk: только heartbeat mark_online / realtime (без подстановок в список User — см. страницу pulse-online).
 # ------------
 app_include_js = [
 	"/assets/pulse_app/js/pulse_socket.js",
-	"/assets/pulse_app/js/user_pulse.js",
 ]
 
-# Только app_include_js — двойная загрузка User doctype_js ломала отрисовку формы у части сайтов.
+# Страница «Pulse — онлайн» (список онлайн + Ping): скрипт подгружается только на этой странице.
+page_js = {"pulse-online": "public/js/pulse_online_page.js"}

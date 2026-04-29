@@ -5,7 +5,11 @@ from __future__ import annotations
 import frappe
 from frappe.utils import get_datetime
 
-from pulse_app.pulse.setup.workspace_sidebar import ensure_sidebar, upgrade_pulse_workspace_if_legacy
+from pulse_app.pulse.setup.workspace_sidebar import (
+	ensure_sidebar,
+	sync_pulse_workspace_shortcuts_from_app,
+	upgrade_pulse_workspace_if_legacy,
+)
 
 
 def ensure_pulse_user_custom_fields():
@@ -70,16 +74,54 @@ def _ensure_user_cf_pulse_presence_source():
 
 def after_install():
 	ensure_pulse_user_custom_fields()
+	ensure_pulse_online_page()
+	sync_pulse_workspace_shortcuts_from_app()
 	ensure_sidebar()
 
 
 def after_migrate():
 	ensure_pulse_user_custom_fields()
+	ensure_pulse_online_page()
 	_ensure_pulse_user_field_in_list_view()
+	_hide_pulse_columns_from_user_list()
 	_sync_legacy_pulse_profile_into_user()
 	_remove_pulse_user_profile_doctype()
 	upgrade_pulse_workspace_if_legacy()
+	sync_pulse_workspace_shortcuts_from_app()
 	ensure_sidebar()
+
+
+def ensure_pulse_online_page():
+	"""Desk Page pulse-online — скрипт через hooks page_js."""
+	if frappe.db.exists("Page", "pulse-online"):
+		return
+	try:
+		doc = frappe.new_doc("Page")
+		doc.update(
+			{
+				"name": "pulse-online",
+				"page_name": "pulse-online",
+				"title": "Pulse — онлайн",
+				"module": "Pulse",
+				"standard": "Yes",
+			}
+		)
+		doc.append("roles", {"role": "Desk User"})
+		doc.insert(ignore_permissions=True)
+	except Exception:
+		frappe.log_error(title="Pulse: ensure Page pulse-online", message=frappe.get_traceback())
+
+
+def _hide_pulse_columns_from_user_list():
+	"""Не показывать поля Pulse в стандартном списке User (отдельная страница pulse-online)."""
+	for fn in ("pulse_last_seen_on", "pulse_presence_source"):
+		name = frappe.db.get_value("Custom Field", {"dt": "User", "fieldname": fn}, "name")
+		if not name:
+			continue
+		try:
+			frappe.db.set_value("Custom Field", name, "in_list_view", 0, update_modified=False)
+		except Exception:
+			pass
 
 
 def _ensure_pulse_user_field_in_list_view():
