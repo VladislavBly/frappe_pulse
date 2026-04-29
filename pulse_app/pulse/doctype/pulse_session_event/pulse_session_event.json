@@ -1,0 +1,76 @@
+{
+  "actions": [],
+  "allow_rename": 0,
+  "autoname": "naming_series:.#####",
+  "creation": "2026-04-29 00:00:00.000000",
+  "doctype": "DocType",
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": ["naming_series", "user", "event_type", "occurred_on", "ip_address", "user_agent"],
+  "fields": [
+    {
+      "default": "PSE-",
+      "fieldname": "naming_series",
+      "fieldtype": "Select",
+      "hidden": 1,
+      "label": "Series",
+      "options": "PSE-",
+      "reqd": 1
+    },
+    {
+      "fieldname": "user",
+      "fieldtype": "Link",
+      "in_list_view": 1,
+      "label": "User",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "event_type",
+      "fieldtype": "Select",
+      "in_list_view": 1,
+      "label": "Event",
+      "options": "Login\nLogout",
+      "reqd": 1
+    },
+    {
+      "default": "Now",
+      "fieldname": "occurred_on",
+      "fieldtype": "Datetime",
+      "in_list_view": 1,
+      "label": "Occurred on",
+      "reqd": 1
+    },
+    {
+      "fieldname": "ip_address",
+      "fieldtype": "Data",
+      "label": "IP address"
+    },
+    {
+      "fieldname": "user_agent",
+      "fieldtype": "Small Text",
+      "label": "User agent"
+    }
+  ],
+  "index_web_pages_for_search": 0,
+  "links": [],
+  "module": "Pulse",
+  "name": "Pulse Session Event",
+  "naming_rule": "By \"Naming Series\" field",
+  "owner": "Administrator",
+  "permissions": [
+    {
+      "create": 1,
+      "delete": 1,
+      "read": 1,
+      "report": 1,
+      "role": "System Manager",
+      "share": 1,
+      "write": 1
+    }
+  ],
+  "sort_field": "occurred_on",
+  "sort_order": "DESC",
+  "states": [],
+  "track_changes": 1
+}
