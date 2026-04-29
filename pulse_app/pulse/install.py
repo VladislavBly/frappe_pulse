@@ -32,7 +32,8 @@ def _ensure_user_cf_pulse_last_seen():
 				"description": "Updated when the user connects with Pulse (Socket.IO / mark_online). Shown in User list as Online/Away.",
 			}
 		)
-		doc.insert()
+		doc.flags.ignore_validate = True
+		doc.insert(ignore_permissions=True)
 	except Exception:
 		frappe.log_error(
 			title="Pulse: Custom Field User.pulse_last_seen_on",
@@ -58,7 +59,8 @@ def _ensure_user_cf_pulse_presence_source():
 				"description": "Client label from mark_online (e.g. desk, portal-spa).",
 			}
 		)
-		doc.insert()
+		doc.flags.ignore_validate = True
+		doc.insert(ignore_permissions=True)
 	except Exception:
 		frappe.log_error(
 			title="Pulse: Custom Field User.pulse_presence_source",

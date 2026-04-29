@@ -2,11 +2,33 @@
 
 from __future__ import annotations
 
+import json
+import os
+
 import frappe
 
 APP_NAME = "pulse_app"
 SIDEBAR_TITLE = "Pulse"
 WORKSPACE_NAME = "Pulse"
+
+
+def sanitize_pulse_workspace_payload(data: dict) -> dict:
+	"""Ярлыки только на реально существующие DocType (нет Pulse User Profile / migrate порядок)."""
+	shortcuts = []
+	for row in data.get("shortcuts") or []:
+		lt = row.get("link_to")
+		if lt and frappe.db.exists("DocType", lt):
+			shortcuts.append(row)
+	if not shortcuts:
+		shortcuts = [
+			{"doc_view": "List", "label": "User", "link_to": "User", "type": "DocType"},
+		]
+	data["shortcuts"] = shortcuts
+	items = []
+	for s in shortcuts:
+		items.append({"type": "shortcut", "data": {"shortcut_name": s.get("label"), "col": "4"}})
+	data["content"] = json.dumps(items)
+	return data
 
 
 def ensure_sidebar() -> None:
@@ -46,9 +68,6 @@ def ensure_sidebar() -> None:
 
 def upgrade_pulse_workspace_if_legacy() -> None:
 	"""Убрать ярлык Pulse User Profile из сохранённого Workspace после перехода на поля User."""
-	import json
-	import os
-
 	if not frappe.db.exists("Workspace", WORKSPACE_NAME):
 		return
 	path = frappe.get_app_path("pulse_app", "pulse", "workspace", "pulse", "pulse.json")
@@ -56,6 +75,7 @@ def upgrade_pulse_workspace_if_legacy() -> None:
 		return
 	with open(path, encoding="utf-8") as f:
 		data = json.load(f)
+	data = sanitize_pulse_workspace_payload(data)
 	ws = frappe.get_doc("Workspace", WORKSPACE_NAME)
 	legacy = False
 	for ch in ws.shortcuts or []:
@@ -70,15 +90,16 @@ def upgrade_pulse_workspace_if_legacy() -> None:
 	for s in data.get("shortcuts", []):
 		ws.append("shortcuts", s)
 	ws.content = data.get("content")
-	ws.save(ignore_permissions=True)
+	try:
+		ws.save(ignore_permissions=True)
+	except Exception:
+		frappe.log_error(title="pulse_app: upgrade_pulse_workspace_if_legacy save", message=frappe.get_traceback())
 
 
 def ensure_pulse_workspace_record() -> None:
 	"""Импорт Workspace из JSON, если migrate не подтянул файл."""
 	if frappe.db.exists("Workspace", WORKSPACE_NAME):
 		return
-	import json
-	import os
 
 	path = frappe.get_app_path("pulse_app", "pulse", "workspace", "pulse", "pulse.json")
 	if not os.path.isfile(path):
@@ -88,6 +109,7 @@ def ensure_pulse_workspace_record() -> None:
 			data = json.load(f)
 		if data.get("doctype") != "Workspace":
 			return
+		data = sanitize_pulse_workspace_payload(data)
 		doc = frappe.get_doc(data)
 		doc.insert(ignore_permissions=True)
 	except Exception:
@@ -191,7 +213,8 @@ def _build_sidebar_rows() -> list[dict]:
 		)
 
 	section("Pulse")
-	doctype_link("Pulse Session Event", "Pulse Session Event")
+	if frappe.db.exists("DocType", "Pulse Session Event"):
+		doctype_link("Pulse Session Event", "Pulse Session Event")
 
 	section("Users")
 	doctype_link("User", "User")
