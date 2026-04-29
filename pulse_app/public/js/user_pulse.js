@@ -1,14 +1,12 @@
 // User list + form: Pulse Online / Away / No data (окно 120 с — как ONLINE_WINDOW_SEC в service.py).
 //
-// ВАЖНО (Frappe BaseList): при первом открытии List/User, если frappe.listview_settings.User
-// ещё undefined, ListView делает this.settings = {} — объект не привязан к глобалу. Последующее
-// присвоение frappe.listview_settings.User = { formatters: ... } не обновляет уже открытый список.
-// Поэтому: (1) pulse_socket.js создаёт пустой User до ListView; (2) здесь мутируем ТОТ ЖЕ объект;
-// (3) после merge подставляем cur_list.settings = frappe.listview_settings.User.
+// В Frappe колонка Subject (Полное имя) не всегда проходит через formatters так же, как обычные поля
+// (см. list_view.js get_subject_element / get_subject_text). Поэтому бейдж у имени рисуем
+// дополнительно после render_list — это работает во всех версиях Desk с классическим ListView.
 
 (function () {
 	const PULSE_ONLINE_WINDOW_SEC = 120;
-	const MERGE_REV = 3;
+	const MERGE_REV = 4;
 
 	function pulse_presence_badge_html(doc) {
 		if (!doc || !doc.pulse_last_seen_on) {
@@ -67,6 +65,80 @@
 		}
 	}
 
+	/** После отрисовки строк — бейдж рядом с темой (имя), не зависит от formatters Subject. */
+	function pulse_paint_user_rows(listview) {
+		if (!listview || listview.doctype !== "User" || !listview.$result || !listview.data) {
+			return;
+		}
+		const $ = window.jQuery;
+		listview.$result.find(".pulse-user-badge-slot").remove();
+
+		for (let i = 0; i < listview.data.length; i++) {
+			const doc = listview.data[i];
+			const name = doc.name;
+			if (!name) {
+				continue;
+			}
+			const esc = name.replace(/'/g, "\\'");
+			const $cb = listview.$result.find(`.list-row-checkbox[data-name='${esc}']`);
+			if (!$cb.length) {
+				continue;
+			}
+			const $row = $cb.closest(".list-row-container").find(".list-row").first();
+			if (!$row.length) {
+				continue;
+			}
+			let $slot = $row.find(".list-subject").first();
+			if (!$slot.length) {
+				$slot = $row.find(".level-left .list-row-col").first();
+			}
+			if (!$slot.length) {
+				continue;
+			}
+			const html = pulse_presence_badge_html(doc);
+			$slot.append(
+				`<span class="pulse-user-badge-slot" style="margin-left:6px;display:inline-block;vertical-align:middle;">${html}</span>`
+			);
+		}
+	}
+
+	function pulse_install_listview_dom_patch() {
+		if (window.__pulse_lv_render_patched) {
+			return true;
+		}
+		const LV = frappe.views && frappe.views.ListView;
+		if (!LV || !LV.prototype || typeof LV.prototype.render_list !== "function") {
+			return false;
+		}
+		window.__pulse_lv_render_patched = true;
+		const orig = LV.prototype.render_list;
+		LV.prototype.render_list = function () {
+			const ret = orig.apply(this, arguments);
+			try {
+				if (this.doctype === "User") {
+					pulse_paint_user_rows(this);
+				}
+			} catch (e) {
+				if (window.console && console.error) {
+					console.error("pulse_paint_user_rows", e);
+				}
+			}
+			return ret;
+		};
+		return true;
+	}
+
+	function pulse_try_install_dom_patch() {
+		if (pulse_install_listview_dom_patch()) {
+			return;
+		}
+		[200, 600, 1500].forEach(function (ms) {
+			setTimeout(function () {
+				pulse_install_listview_dom_patch();
+			}, ms);
+		});
+	}
+
 	function merge_pulse_user_list_settings() {
 		frappe.provide("frappe.listview_settings");
 		if (!frappe.listview_settings.User) {
@@ -87,16 +159,8 @@
 			new Set([...(s.add_fields || []), "pulse_last_seen_on", "pulse_presence_source"])
 		);
 
+		// Subject колонку красит pulse_paint_user_rows; здесь — только отдельное поле в таблице.
 		s.formatters = Object.assign({}, captured, {
-			full_name(value, df, doc) {
-				let html;
-				if (captured.full_name) {
-					html = captured.full_name(value, df, doc);
-				} else {
-					html = frappe.utils.escape_html(value || doc.name || "");
-				}
-				return `${html}&nbsp;${pulse_presence_badge_html(doc)}`;
-			},
 			pulse_last_seen_on(value, df, doc) {
 				if (captured.pulse_last_seen_on) {
 					return captured.pulse_last_seen_on(value, df, doc);
@@ -122,14 +186,17 @@
 					frappe.msgprint({
 						title: __("Pulse"),
 						message: __(
-							"Online if last activity within {0} seconds (Desk + Socket.IO). " +
-								"If you always see «Pulse: No data», run migrate and clear cache, and ensure the realtime service is running.",
-							[PULSE_ONLINE_WINDOW_SEC]
+							"Green/Away next to the name is Pulse (Desk + Socket.IO). «No data» means the field is empty or realtime is off. You can add the «Pulse last seen» column from the list menu."
 						),
 						indicator: "blue",
 					});
 				});
 			} catch (e) {
+				/* ignore */
+			}
+			try {
+				pulse_paint_user_rows(listview);
+			} catch (e2) {
 				/* ignore */
 			}
 		};
@@ -140,14 +207,30 @@
 	}
 
 	merge_pulse_user_list_settings();
+	pulse_try_install_dom_patch();
 
 	frappe.ready(function () {
 		merge_pulse_user_list_settings();
+		pulse_try_install_dom_patch();
 		refresh_user_list_if_open();
+		try {
+			if (window.cur_list && cur_list.doctype === "User") {
+				pulse_paint_user_rows(cur_list);
+			}
+		} catch (e) {
+			/* ignore */
+		}
 		[50, 400, 1200].forEach(function (ms) {
 			setTimeout(function () {
 				merge_pulse_user_list_settings();
 				refresh_user_list_if_open();
+				try {
+					if (window.cur_list && cur_list.doctype === "User") {
+						pulse_paint_user_rows(cur_list);
+					}
+				} catch (e) {
+					/* ignore */
+				}
 			}, ms);
 		});
 	});
@@ -158,6 +241,13 @@
 				frappe.after_ajax(function () {
 					merge_pulse_user_list_settings();
 					refresh_user_list_if_open();
+					try {
+						if (window.cur_list && cur_list.doctype === "User") {
+							pulse_paint_user_rows(cur_list);
+						}
+					} catch (e) {
+						/* ignore */
+					}
 				});
 		});
 	}
