@@ -92,8 +92,16 @@ def after_migrate():
 
 
 def ensure_pulse_online_page():
-	"""Desk Page pulse-online — скрипт через hooks page_js."""
+	"""Desk Page pulse-online — кастомная страница; JS подключается через hooks page_js."""
 	if frappe.db.exists("Page", "pulse-online"):
+		# Раньше было standard=Yes без fixture в репозитории → Desk показывал «страница не найдена».
+		std = frappe.db.get_value("Page", "pulse-online", "standard")
+		if std == "Yes":
+			try:
+				frappe.db.set_value("Page", "pulse-online", "standard", "No", update_modified=False)
+				frappe.clear_cache(doctype="Page")
+			except Exception:
+				frappe.log_error(title="Pulse: fix Page pulse-online standard", message=frappe.get_traceback())
 		return
 	try:
 		doc = frappe.new_doc("Page")
@@ -103,7 +111,7 @@ def ensure_pulse_online_page():
 				"page_name": "pulse-online",
 				"title": "Pulse — онлайн",
 				"module": "Pulse",
-				"standard": "Yes",
+				"standard": "No",
 			}
 		)
 		doc.append("roles", {"role": "Desk User"})
