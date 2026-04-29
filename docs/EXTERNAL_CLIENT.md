@@ -38,7 +38,7 @@ curl -sS -X POST 'https://YOUR_SITE/api/pulse/presence/mark-online' \
   -d '{"service":"portal-spa"}'
 ```
 
-Значение **`service`** сохраняется в **Pulse User Profile.presence_source** и попадает в payload realtime (ниже).
+Значение **`service`** сохраняется в **`User.pulse_presence_source`** и попадает в payload realtime (ниже).
 
 ---
 

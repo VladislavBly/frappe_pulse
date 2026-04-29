@@ -1,6 +1,6 @@
 {
   "app": "pulse_app",
-  "content": "[{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pulse User Profile\",\"col\":\"4\"}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pulse Session Event\",\"col\":\"4\"}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"User\",\"col\":\"4\"}}]",
+  "content": "[{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pulse Session Event\",\"col\":\"4\"}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"User\",\"col\":\"4\"}}]",
   "doctype": "Workspace",
   "icon": "activity",
   "is_hidden": 0,
@@ -11,12 +11,6 @@
   "public": 1,
   "sequence_id": 92,
   "shortcuts": [
-    {
-      "doc_view": "List",
-      "label": "Pulse User Profile",
-      "link_to": "Pulse User Profile",
-      "type": "DocType"
-    },
     {
       "doc_view": "List",
       "label": "Pulse Session Event",

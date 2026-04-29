@@ -5,14 +5,14 @@ app_description = "User presence, last activity, and login/session history for F
 app_email = "pulse@example.com"
 app_license = "mit"
 
-# Плитка на экране приложений Desk (v15+): нужен ключ logo — иначе ошибка при create_desktop_icons_from_installed_apps).
+# Плитка на экране приложений Desk (v15+): задайте logo (файл в public/), иначе плитка может не создаться корректно.
 # route ведёт на публичный Workspace Pulse (pulse/workspace/pulse/pulse.json).
 add_to_apps_screen = [
 	{
 		"name": "pulse_app",
 		"title": "Pulse",
 		"route": "/app/pulse",
-		"logo": "",
+		"logo": "/assets/pulse_app/images/pulse.svg",
 	}
 ]
 
@@ -29,6 +29,7 @@ before_request = ["pulse_app.utils.api_routes.handle_api_routes"]
 # ------------
 app_include_js = "/assets/pulse_app/js/pulse_socket.js"
 
-# User list: колонка Pulse + Online/Away — через doctype_list_js (на списке надёжнее, чем только doctype_js)
+# User: список (бейдж у имени + колонка) и форма — нужны оба хука
 # ------------
+doctype_js = {"User": "public/js/user_pulse.js"}
 doctype_list_js = {"User": "public/js/user_pulse.js"}

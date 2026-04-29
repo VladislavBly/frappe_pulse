@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import frappe
+from frappe.utils import get_datetime
 
-from pulse_app.pulse.setup.workspace_sidebar import ensure_sidebar
+from pulse_app.pulse.setup.workspace_sidebar import ensure_sidebar, upgrade_pulse_workspace_if_legacy
 
 
 def ensure_pulse_user_custom_fields():
-	"""Поле User.pulse_last_seen_on — для списка и формы User в Desk."""
+	"""Расширение User: pulse_last_seen_on, pulse_presence_source — без отдельного профиля Pulse."""
+	_ensure_user_cf_pulse_last_seen()
+	_ensure_user_cf_pulse_presence_source()
+
+
+def _ensure_user_cf_pulse_last_seen():
 	if frappe.db.exists("Custom Field", {"dt": "User", "fieldname": "pulse_last_seen_on"}):
 		return
 
@@ -23,13 +29,39 @@ def ensure_pulse_user_custom_fields():
 				"insert_after": "last_login",
 				"read_only": 1,
 				"in_list_view": 1,
-				"description": "Updated when the user connects to Desk with Pulse (Socket.IO). Shown in User list as Online/Away.",
+				"description": "Updated when the user connects with Pulse (Socket.IO / mark_online). Shown in User list as Online/Away.",
 			}
 		)
 		doc.insert()
 	except Exception:
 		frappe.log_error(
 			title="Pulse: Custom Field User.pulse_last_seen_on",
+			message=frappe.get_traceback(),
+		)
+
+
+def _ensure_user_cf_pulse_presence_source():
+	if frappe.db.exists("Custom Field", {"dt": "User", "fieldname": "pulse_presence_source"}):
+		return
+	if "pulse_last_seen_on" not in frappe.db.get_table_columns("User"):
+		return
+	try:
+		doc = frappe.get_doc(
+			{
+				"doctype": "Custom Field",
+				"dt": "User",
+				"fieldname": "pulse_presence_source",
+				"label": "Pulse presence source",
+				"fieldtype": "Data",
+				"insert_after": "pulse_last_seen_on",
+				"read_only": 1,
+				"description": "Client label from mark_online (e.g. desk, portal-spa).",
+			}
+		)
+		doc.insert()
+	except Exception:
+		frappe.log_error(
+			title="Pulse: Custom Field User.pulse_presence_source",
 			message=frappe.get_traceback(),
 		)
 
@@ -42,6 +74,8 @@ def after_install():
 def after_migrate():
 	ensure_pulse_user_custom_fields()
 	_ensure_pulse_user_field_in_list_view()
+	_sync_legacy_pulse_profile_into_user()
+	upgrade_pulse_workspace_if_legacy()
 	ensure_sidebar()
 
 
@@ -58,3 +92,40 @@ def _ensure_pulse_user_field_in_list_view():
 		frappe.db.set_value("Custom Field", name, "in_list_view", 1, update_modified=False)
 	except Exception:
 		pass
+
+
+def _sync_legacy_pulse_profile_into_user():
+	"""Одноразово подтянуть данные из legacy Pulse User Profile в поля User (если профиль был новее)."""
+	if not frappe.db.exists("DocType", "Pulse User Profile"):
+		return
+	cols = frappe.db.get_table_columns("User")
+	if "pulse_last_seen_on" not in cols:
+		return
+	try:
+		profiles = frappe.get_all(
+			"Pulse User Profile",
+			fields=["user", "last_seen_on", "presence_source"],
+			limit_page_length=50000,
+		)
+	except Exception:
+		return
+
+	for p in profiles:
+		u = p.get("user")
+		if not u or not frappe.db.exists("User", u):
+			continue
+		prof_ts = p.get("last_seen_on")
+		if not prof_ts:
+			continue
+		cur = frappe.db.get_value("User", u, "pulse_last_seen_on")
+		if cur and get_datetime(cur) >= get_datetime(prof_ts):
+			continue
+		values = {"pulse_last_seen_on": prof_ts}
+		if "pulse_presence_source" in cols:
+			ps = (p.get("presence_source") or "").strip()
+			if ps:
+				values["pulse_presence_source"] = ps
+		try:
+			frappe.db.set_value("User", u, values, update_modified=False)
+		except Exception:
+			continue

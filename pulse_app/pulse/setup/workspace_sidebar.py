@@ -44,6 +44,35 @@ def ensure_sidebar() -> None:
 	_sync_desktop_icons_after_sidebar()
 
 
+def upgrade_pulse_workspace_if_legacy() -> None:
+	"""Убрать ярлык Pulse User Profile из сохранённого Workspace после перехода на поля User."""
+	import json
+	import os
+
+	if not frappe.db.exists("Workspace", WORKSPACE_NAME):
+		return
+	path = frappe.get_app_path("pulse_app", "pulse", "workspace", "pulse", "pulse.json")
+	if not os.path.isfile(path):
+		return
+	with open(path, encoding="utf-8") as f:
+		data = json.load(f)
+	ws = frappe.get_doc("Workspace", WORKSPACE_NAME)
+	legacy = False
+	for ch in ws.shortcuts or []:
+		if getattr(ch, "link_to", None) == "Pulse User Profile":
+			legacy = True
+			break
+	if not legacy and ws.content and "Pulse User Profile" in ws.content:
+		legacy = True
+	if not legacy:
+		return
+	ws.shortcuts = []
+	for s in data.get("shortcuts", []):
+		ws.append("shortcuts", s)
+	ws.content = data.get("content")
+	ws.save(ignore_permissions=True)
+
+
 def ensure_pulse_workspace_record() -> None:
 	"""Импорт Workspace из JSON, если migrate не подтянул файл."""
 	if frappe.db.exists("Workspace", WORKSPACE_NAME):
@@ -162,7 +191,6 @@ def _build_sidebar_rows() -> list[dict]:
 		)
 
 	section("Pulse")
-	doctype_link("Pulse User Profile", "Pulse User Profile")
 	doctype_link("Pulse Session Event", "Pulse Session Event")
 
 	section("Users")

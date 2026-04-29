@@ -40,7 +40,7 @@ Architecture follows the same **router → controllers → services** layering u
 | **REST** | `POST /api/pulse/presence/mark-online`, `mark-offline`, `GET .../presence/online`, `GET .../session-events`, plus whitelisted methods. |
 | **Realtime** | Subscribe to **`pulse_presence`** (payload includes `kind`, `user`, `service`, `online_users`). |
 | **Multi-client** | Pass a **`service`** string so you know which frontend reported presence. |
-| **Data model** | `Pulse User Profile`, `Pulse Session Event`; optional sync to User custom field `pulse_last_seen_on`. |
+| **Data model** | User custom fields (`pulse_last_seen_on`, `pulse_presence_source`); session history in `Pulse Session Event`. Legacy `Pulse User Profile` is not written by the app anymore. |
 
 ---
 

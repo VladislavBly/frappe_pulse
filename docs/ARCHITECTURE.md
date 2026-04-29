@@ -13,7 +13,7 @@
 - **рассылки обновлений присутствия в реальном времени** через **`frappe.publish_realtime`** (штатный Redis → Node Socket.IO → клиенты Desk);
 - хранения **истории событий входа и выхода** (Login / Logout) с метаданными запроса.
 
-Приложение **не заменяет** ядро **User**: расширение модели делается через отдельный DocType **Pulse User Profile** и журнал **Pulse Session Event**.
+Приложение **не заменяет** ядро **User**: присутствие хранится в **Custom Fields** у **User**; журнал входов/выходов — в **Pulse Session Event**. DocType **Pulse User Profile** в репозитории остаётся только для совместимости со старыми БД; текущий код в него **не пишет**.
 
 ---
 
@@ -24,7 +24,7 @@
 | Возможность | Статус | Примечание |
 |-------------|--------|------------|
 | Обновление присутствия при **подключении / переподключении Socket.IO Desk** | Реализовано | `public/js/pulse_socket.js` вешает **`connect`** и **`reconnect`** на клиент Socket.IO → один вызов **`pulse_app.api.presence.mark_online`** (whitelist). **Периодического HTTP-heartbeat нет.** |
-| Рассылка изменений всем подключённым клиентам Desk | Реализовано | После сохранения профиля — **`frappe.publish_realtime("pulse_presence", {...}, after_commit=True)`**; на клиенте — **`frappe.realtime.on("pulse_presence", ...)`** и событие jQuery **`$(document).trigger("pulse_presence", data)`**. |
+| Рассылка изменений всем подключённым клиентам Desk | Реализовано | После обновления полей User — **`frappe.publish_realtime("pulse_presence", {...}, after_commit=True)`**; на клиенте — **`frappe.realtime.on("pulse_presence", ...)`** и событие jQuery **`$(document).trigger("pulse_presence", data)`**. |
 | Снимок «онлайн» по REST (`GET .../presence/online`) | Реализовано | Для первичной загрузки UI; актуальность списка дальше — через realtime. Порог **`ONLINE_WINDOW_SEC`** (по умолчанию 120 с) в `service.py`. |
 | Чтение истории сессий (`GET .../session-events`) | Реализовано | Обычный пользователь — только свои записи; **System Manager** — фильтр `user` и полный журнал. |
 | Запись Login/Logout в **Pulse Session Event** | Частично | Есть **`record_session_event()`**; автоматический вызов из хуков авторизации Frappe — по желанию. |
@@ -34,10 +34,10 @@
 
 ### 2.2. Логика «кто онлайн»
 
-- **Источник истины в БД:** **`Pulse User Profile.last_seen_on`**, обновляется при успешном вызове **`mark_online`** (после событий **`connect` / `reconnect`** Socket.IO, не по таймеру).
+- **Источник истины в БД:** **`User.pulse_last_seen_on`** (и опционально **`User.pulse_presence_source`** для метки клиента), обновляются при успешном вызове **`mark_online`** (после событий **`connect` / `reconnect`** Socket.IO, не по таймеру).
 - **Сессия Frappe:** пользователь в whitelist определяется через **`frappe.session.user`** — те же cookie / механизм, что у **`/api/method/...`** и Desk.
 - **Realtime:** обновления списка расходятся по **Socket.IO** через стек Frappe (**Redis pub/sub** → Node **realtime** → браузеры); см. [документацию Frappe Realtime](https://docs.frappe.io/framework/user/en/api/realtime).
-- **Онлайн:** пользователь учитывается в **`online_users`** и в **`GET .../presence/online`**, если **`last_seen_on`** не старше окна **`ONLINE_WINDOW_SEC`**.
+- **Онлайн:** пользователь учитывается в **`online_users`** и в **`GET .../presence/online`**, если **`pulse_last_seen_on`** не старше окна **`ONLINE_WINDOW_SEC`**.
 
 ### 2.3. Связь с полем **User.last_login**
 
@@ -92,7 +92,7 @@ frappe_pulse/
         │   ├── controller.py
         │   └── service.py
         └── doctype/
-            ├── pulse_user_profile/
+            ├── pulse_user_profile/    # legacy метаданные
             └── pulse_session_event/
 ```
 
@@ -110,7 +110,7 @@ sequenceDiagram
 	B->>SIO: connect / reconnect (cookie сессии)
 	B->>W: POST /api/method/pulse_app.api.presence.mark_online
 	W->>Svc: mark_online_presence()
-	Svc->>Svc: upsert Pulse User Profile
+	Svc->>Svc: update User (pulse_last_seen_on / pulse_presence_source)
 	Svc->>R: publish_realtime(pulse_presence, …)
 	R->>SIO: сообщение в канал realtime
 	SIO->>B: событие pulse_presence
@@ -158,16 +158,14 @@ sequenceDiagram
 
 ## 4. Модель данных (DocTypes)
 
-### 4.1. Pulse User Profile
+### 4.1. Расширение User (Custom Field)
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `user` | Link → User, уникально | Имя пользователя Frappe (ключ связи 1:1). |
-| `last_seen_on` | Datetime | Время последнего успешного обновления через **`mark_online`** (обычно после **connect/reconnect** Socket.IO). |
+| `pulse_last_seen_on` | Datetime | Последнее успешное **`mark_online`** (обычно после **connect/reconnect** Socket.IO). Список User: индикатор Online/Away. |
+| `pulse_presence_source` | Data | Необязательная метка клиента из **`service`** (desk, portal-spa, …). |
 
-Имя документа: **`autoname`** по полю **`user`**.
-
-### 4.2. Pulse Session Event
+### 4.2. Pulse Session Event (история)
 
 | Поле | Тип | Описание |
 |------|-----|----------|
@@ -178,6 +176,10 @@ sequenceDiagram
 | `user_agent` | Small Text | Заголовок User-Agent. |
 
 Нумерация: naming series **`PSE-.#####`**.
+
+### 4.3. Legacy: Pulse User Profile
+
+В старых установках таблица могла заполняться; при **`migrate`** актуальные значения при возможности **копируются в поля User**. Новые записи профиля сервис **не создаёт**.
 
 ---
 
@@ -210,7 +212,7 @@ frappe.realtime.on("pulse_presence", function (data) {
 ### 5.4. `POST /api/pulse/presence/mark-online` и `POST .../mark-offline`
 
 - Назначение: то же, что whitelist-методы, но через **PulseRouter** и JSON ответа **`{"data": ...}`** — удобно внешним SPA «чисто по REST».
-- **`mark-online`**, тело: `{ "service": "portal-spa" }` — необязательное поле **service** (латиница/цифры/`._:-/`, до 120 символов); сохраняется в **Pulse User Profile.presence_source** и уходит в **`pulse_presence`** для всех клиентов.
+- **`mark-online`**, тело: `{ "service": "portal-spa" }` — необязательное поле **service** (латиница/цифры/`._:-/`, до 120 символов); сохраняется в **`User.pulse_presence_source`** и уходит в **`pulse_presence`** для всех клиентов.
 - Подробности и Socket.IO для стороннего фронта: [EXTERNAL_CLIENT.md](EXTERNAL_CLIENT.md).
 
 ### 5.5. `GET /api/pulse/presence/online`
@@ -243,7 +245,7 @@ frappe.realtime.on("pulse_presence", function (data) {
 
 - В JSON DocTypes для Desk выставлены права в первую очередь для **System Manager**; массовое чтение журналов посторонними ролями через стандартный список Frappe ограничено дизайном прав (проверьте актуальные JSON при доработках).
 - REST для истории дополнительно ограничен в **контроллере** (не админ не видит чужие записи через API).
-- Вставка профиля и событий из сервиса выполняется с **`ignore_permissions=True`** там, где сценарий уже проверен логикой приложения (обновление только своего профиля при **`mark_online`**).
+- Запись событий сессии из сервиса выполняется с **`ignore_permissions=True`** там, где сценарий уже проверен логикой приложения; **`mark_online`** обновляет строку **своего** User через **`frappe.db.set_value`** (внутреннее обновление полей).
 
 ---
 

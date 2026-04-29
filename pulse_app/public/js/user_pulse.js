@@ -1,32 +1,30 @@
-// User list: Pulse last seen + явный текст Online / Away / No data.
-// Окно времени как в pulse service (ONLINE_WINDOW_SEC = 120).
-const PULSE_ONLINE_WINDOW_SEC = 120;
+// User list + form: Pulse Online / Away / No data (окно 120 с — как ONLINE_WINDOW_SEC в service.py).
+(function () {
+	const PULSE_ONLINE_WINDOW_SEC = 120;
 
-frappe.listview_settings["User"] = {
-	add_fields: ["pulse_last_seen_on"],
+	function pulse_presence_badge_html(doc) {
+		if (!doc || !doc.pulse_last_seen_on) {
+			return `<span class="indicator-pill no-indicator ellipsis pulse-presence-tag">${frappe.utils.escape_html(__("Pulse: No data"))}</span>`;
+		}
+		const t = new Date(doc.pulse_last_seen_on).getTime();
+		if (Number.isNaN(t)) {
+			return frappe.utils.escape_html(String(doc.pulse_last_seen_on));
+		}
+		const sec = (Date.now() - t) / 1000;
+		const online = sec >= 0 && sec <= PULSE_ONLINE_WINDOW_SEC;
+		const label = online ? __("Online") : __("Away");
+		const color = online ? "green" : "gray";
+		const time =
+			frappe.datetime.str_to_user && doc.pulse_last_seen_on
+				? frappe.datetime.str_to_user(doc.pulse_last_seen_on)
+				: doc.pulse_last_seen_on;
+		return `<span class="indicator-pill ${color} ellipsis pulse-presence-tag" title="${frappe.utils.escape_html(
+			doc.pulse_presence_source || ""
+		)}">${frappe.utils.escape_html(label)} · ${frappe.utils.escape_html(time)}</span>`;
+	}
 
-	formatters: {
-		pulse_last_seen_on(value, _df, doc) {
-			if (!value) {
-				return `<span class="indicator-pill no-indicator ellipsis">${frappe.utils.escape_html(__("No Pulse"))}</span>`;
-			}
-			const t = new Date(value).getTime();
-			if (Number.isNaN(t)) {
-				return frappe.utils.escape_html(value);
-			}
-			const sec = (Date.now() - t) / 1000;
-			const online = sec >= 0 && sec <= PULSE_ONLINE_WINDOW_SEC;
-			const label = online ? __("Online") : __("Away");
-			const color = online ? "green" : "gray";
-			const time = frappe.datetime.str_to_user
-				? frappe.datetime.str_to_user(value)
-				: value;
-			return `<span class="indicator-pill ${color}">${frappe.utils.escape_html(label)} · ${frappe.utils.escape_html(time)}</span>`;
-		},
-	},
-
-	get_indicator(doc) {
-		if (!doc.pulse_last_seen_on) {
+	function pulse_get_indicator(doc) {
+		if (!doc || !doc.pulse_last_seen_on) {
 			return;
 		}
 		const t = new Date(doc.pulse_last_seen_on).getTime();
@@ -35,8 +33,65 @@ frappe.listview_settings["User"] = {
 		}
 		const sec = (Date.now() - t) / 1000;
 		if (sec >= 0 && sec <= PULSE_ONLINE_WINDOW_SEC) {
-			return [__("Online"), "green", "pulse_last_seen_on"];
+			return [__("Pulse Online"), "green", "pulse_last_seen_on"];
 		}
-		return [__("Away"), "gray", "pulse_last_seen_on"];
-	},
-};
+		return [__("Pulse Away"), "gray", "pulse_last_seen_on"];
+	}
+
+	const prev = frappe.listview_settings.User || {};
+	const prev_fmt = prev.formatters || {};
+	const prev_get_indicator = prev.get_indicator;
+
+	frappe.listview_settings.User = Object.assign({}, prev, {
+		add_fields: Array.from(
+			new Set([...(prev.add_fields || []), "pulse_last_seen_on", "pulse_presence_source"])
+		),
+
+		formatters: Object.assign({}, prev_fmt, {
+			full_name(value, df, doc) {
+				let html;
+				if (prev_fmt.full_name) {
+					html = prev_fmt.full_name(value, df, doc);
+				} else {
+					html = frappe.utils.escape_html(value || doc.name || "");
+				}
+				return `${html} &nbsp;${pulse_presence_badge_html(doc)}`;
+			},
+			pulse_last_seen_on(value, df, doc) {
+				if (prev_fmt.pulse_last_seen_on) {
+					return prev_fmt.pulse_last_seen_on(value, df, doc);
+				}
+				return pulse_presence_badge_html(doc);
+			},
+		}),
+
+		get_indicator(doc) {
+			const mine = pulse_get_indicator(doc);
+			if (mine) {
+				return mine;
+			}
+			if (prev_get_indicator) {
+				return prev_get_indicator(doc);
+			}
+		},
+	});
+
+	if (!window.__pulse_user_form_bound__) {
+		window.__pulse_user_form_bound__ = true;
+		frappe.ui.form.on("User", {
+			refresh(frm) {
+				frm.page.wrapper.find(".pulse-form-presence").remove();
+				const badge = pulse_presence_badge_html(frm.doc);
+				const $area =
+					frm.page.wrapper.find(".page-head .title-area").first().length
+						? frm.page.wrapper.find(".page-head .title-area").first()
+						: frm.page.wrapper.find(".page-head").first();
+				if ($area.length) {
+					$area.append(
+						`<span class="pulse-form-presence" style="margin-left:10px;display:inline-block;vertical-align:middle;">${badge}</span>`
+					);
+				}
+			},
+		});
+	}
+})();

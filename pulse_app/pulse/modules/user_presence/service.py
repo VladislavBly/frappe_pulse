@@ -1,4 +1,8 @@
-"""Присутствие через realtime (publish_realtime), список онлайн, журнал сессий."""
+"""Присутствие через realtime (publish_realtime), список онлайн, журнал сессий.
+
+Источник истины для «кто онлайн» — поля User (pulse_last_seen_on, pulse_presence_source).
+Отдельный DocType Pulse User Profile больше не используется сервисом (legacy в БД допустим).
+"""
 
 from __future__ import annotations
 
@@ -8,7 +12,6 @@ from datetime import datetime, timedelta
 import frappe
 from frappe.utils import get_datetime, now_datetime
 
-PROFILE_DOCTYPE = "Pulse User Profile"
 EVENT_DOCTYPE = "Pulse Session Event"
 
 ONLINE_WINDOW_SEC = 120
@@ -17,6 +20,10 @@ SERVICE_MAX_LEN = 120
 REALTIME_EVENT = "pulse_presence"
 
 _SERVICE_SAFE = re.compile(r"^[a-zA-Z0-9._:\-/]+$")
+
+
+def _user_presence_columns() -> set[str]:
+	return set(frappe.db.get_table_columns("User"))
 
 
 def _require_logged_in() -> str:
@@ -56,50 +63,49 @@ def normalize_presence_service(service: str | None) -> str | None:
 	return s
 
 
-def _upsert_profile_last_seen(
+def row_from_user(user: str, last_seen_on, presence_source: str | None = None) -> dict:
+	"""Формат как у прежнего «profile» для API/realtime (name = имя пользователя User)."""
+	src = (presence_source or "").strip() if presence_source is not None else ""
+	if not src and "pulse_presence_source" in _user_presence_columns():
+		src = (frappe.db.get_value("User", user, "pulse_presence_source") or "").strip()
+	return {
+		"user": user,
+		"last_seen_on": last_seen_on,
+		"name": user,
+		"service": src or None,
+	}
+
+
+def _touch_presence_last_seen(
 	user: str,
 	ts: datetime | None = None,
 	*,
 	service: str | None = None,
 ) -> dict:
 	ts = ts or now_datetime()
-	name = frappe.db.get_value(PROFILE_DOCTYPE, {"user": user}, "name")
-	if name:
-		doc = frappe.get_doc(PROFILE_DOCTYPE, name)
-		doc.last_seen_on = ts
-		if service is not None:
-			doc.presence_source = service
-		doc.save(ignore_permissions=True)
-	else:
-		doc = frappe.get_doc(
-			{
-				"doctype": PROFILE_DOCTYPE,
-				"user": user,
-				"last_seen_on": ts,
-				"presence_source": service or "",
-			}
-		)
-		doc.insert(ignore_permissions=True)
-	row = row_for_profile(doc)
-	_sync_user_pulse_last_seen(user, ts)
-	return row
+	cols = _user_presence_columns()
+	if "pulse_last_seen_on" not in cols:
+		return row_from_user(user, ts, service or "")
 
+	values: dict = {"pulse_last_seen_on": ts}
+	if service is not None and "pulse_presence_source" in cols:
+		values["pulse_presence_source"] = service or ""
 
-def _sync_user_pulse_last_seen(user: str, ts: datetime | None = None) -> None:
-	if "pulse_last_seen_on" not in frappe.db.get_table_columns("User"):
-		return
-	try:
-		frappe.db.set_value("User", user, "pulse_last_seen_on", ts, update_modified=False)
-	except Exception:
-		pass
+	frappe.db.set_value("User", user, values, update_modified=False)
+	src_out: str | None = service
+	if src_out is None and "pulse_presence_source" in cols:
+		src_out = frappe.db.get_value("User", user, "pulse_presence_source")
+	return row_from_user(user, ts, src_out)
 
 
 def _clear_presence(user: str) -> None:
-	name = frappe.db.get_value(PROFILE_DOCTYPE, {"user": user}, "name")
-	if name:
-		frappe.db.set_value(PROFILE_DOCTYPE, name, "last_seen_on", None, update_modified=False)
-		frappe.db.set_value(PROFILE_DOCTYPE, name, "presence_source", None, update_modified=False)
-	_sync_user_pulse_last_seen(user, None)
+	cols = _user_presence_columns()
+	if "pulse_last_seen_on" not in cols:
+		return
+	values: dict = {"pulse_last_seen_on": None}
+	if "pulse_presence_source" in cols:
+		values["pulse_presence_source"] = None
+	frappe.db.set_value("User", user, values, update_modified=False)
 
 
 def mark_offline_presence() -> dict:
@@ -117,31 +123,33 @@ def mark_offline_presence() -> dict:
 	return {"offline": True, "user": user}
 
 
-def row_for_profile(doc) -> dict:
-	src = (getattr(doc, "presence_source", None) or "").strip()
-	return {
-		"user": doc.user,
-		"last_seen_on": doc.last_seen_on,
-		"name": doc.name,
-		"service": src or None,
-	}
-
-
 def _online_users_snapshot() -> list[dict]:
+	if "pulse_last_seen_on" not in _user_presence_columns():
+		return []
+
 	cutoff = now_datetime() - timedelta(seconds=ONLINE_WINDOW_SEC)
+	fields = ["name", "pulse_last_seen_on"]
+	if "pulse_presence_source" in _user_presence_columns():
+		fields.append("pulse_presence_source")
+
 	rows = frappe.get_all(
-		PROFILE_DOCTYPE,
-		filters={"last_seen_on": (">=", cutoff)},
-		fields=["user", "last_seen_on", "name", "presence_source"],
-		order_by="last_seen_on desc",
+		"User",
+		filters={
+			"enabled": 1,
+			"pulse_last_seen_on": (">=", cutoff),
+		},
+		fields=fields,
+		order_by="pulse_last_seen_on desc",
 	)
 	out = []
 	for r in rows:
-		src = (r.get("presence_source") or "").strip()
+		src = ""
+		if "pulse_presence_source" in r:
+			src = (r.get("pulse_presence_source") or "").strip()
 		out.append(
 			{
-				"user": r.user,
-				"last_seen_on": r.last_seen_on,
+				"user": r.name,
+				"last_seen_on": r.pulse_last_seen_on,
 				"service": src or None,
 			}
 		)
@@ -156,7 +164,7 @@ def mark_online_presence(*, service: str | None = None) -> dict:
 	"""
 	user = _require_logged_in()
 	norm = normalize_presence_service(service)
-	row = _upsert_profile_last_seen(user, service=norm)
+	row = _touch_presence_last_seen(user, service=norm)
 	frappe.publish_realtime(
 		REALTIME_EVENT,
 		{
