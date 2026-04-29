@@ -1,6 +1,7 @@
 // User list + form: Pulse Online / Away / No data в колонке pulse_last_seen_on (окно 120 с — как ONLINE_WINDOW_SEC в service.py).
 //
 // Список: только formatter колонки + add_fields (без бейджей рядом с именем).
+// Форма User: полоска под заголовком (v16) или сайдбар / заголовок как запасные варианты.
 
 (function () {
 	const PULSE_ONLINE_WINDOW_SEC = 120;
@@ -25,6 +26,148 @@
 		return `<span class="indicator-pill ${color} ellipsis pulse-presence-tag" title="${frappe.utils.escape_html(
 			doc.pulse_presence_source || ""
 		)}">${frappe.utils.escape_html(label)} · ${frappe.utils.escape_html(time)}</span>`;
+	}
+
+	function pulse_clear_user_form_pulse_ui(frm) {
+		if (!frm || !frm.wrapper || !frm.wrapper.length) {
+			return;
+		}
+		try {
+			frm.wrapper.find(".pulse-form-presence-wrap, .pulse-form-presence-banner").remove();
+			if (frm.page && frm.page.wrapper && frm.page.wrapper.length) {
+				frm.page.wrapper.find(".pulse-form-presence").remove();
+			}
+		} catch (e) {
+			/* ignore */
+		}
+	}
+
+	/** Frappe v16+: основная область формы — заметная полоска сразу под page-head. */
+	function pulse_inject_user_form_main_banner(frm, doc) {
+		const $ = window.jQuery;
+		doc = doc || frm.doc;
+		const badge = pulse_presence_badge_html(doc);
+		const label = frappe.utils.escape_html(__("Pulse presence"));
+
+		const block = `
+			<div class="pulse-form-presence-banner" style="margin: 0 0 12px 0; padding: 12px 14px; border-radius: var(--border-radius-md, 8px); border: 1px solid var(--border-color, rgba(0,0,0,.12)); background: var(--control-bg, var(--fg-color, #f8f9fa));">
+				<div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+					<span class="text-muted" style="font-size: 12px;">${label}</span>
+					<span class="pulse-form-presence-banner-inner">${badge}</span>
+				</div>
+			</div>`;
+
+		const $main = frm.wrapper.find(".layout-main-section").first();
+		if (!$main.length) {
+			return false;
+		}
+		const $head = $main.children(".page-head").first().length
+			? $main.children(".page-head").first()
+			: $main.find(".page-head").first();
+		if ($head.length) {
+			$head.after(block);
+			return true;
+		}
+		$main.prepend(block);
+		return true;
+	}
+
+	function pulse_inject_user_form_sidebar_badge(frm, doc) {
+		const $ = window.jQuery;
+		doc = doc || frm.doc;
+		const badge = pulse_presence_badge_html(doc);
+		const label = frappe.utils.escape_html(__("Pulse presence"));
+
+		const block = `
+			<div class="pulse-form-presence-wrap" style="margin: 0 -4px 14px; padding: 12px 8px 14px; text-align: center; border-bottom: 1px solid var(--border-color, rgba(0,0,0,0.08));">
+				<div class="text-muted small" style="margin-bottom: 8px; letter-spacing: 0.02em;">${label}</div>
+				<div class="pulse-form-presence-badge" style="display: inline-flex; justify-content: center; flex-wrap: wrap; gap: 6px; padding: 8px 10px; border-radius: var(--border-radius-lg, 10px); background: var(--control-bg, #f4f4f4);">
+					${badge}
+				</div>
+			</div>`;
+
+		const $side = frm.wrapper.find(".layout-side-section").first();
+		if (!$side.length) {
+			return false;
+		}
+
+		let $anchor = $side.find(".sidebar-image-section, .show-sidebar-image, .form-sidebar .sidebar-image-wrapper").first();
+		if (!$anchor.length) {
+			const $imgw = $side.find(".sidebar-image-wrapper").first();
+			if ($imgw.length) {
+				$anchor = $imgw.closest(".sidebar-image-section").length
+					? $imgw.closest(".sidebar-image-section")
+					: $imgw.parent();
+			}
+		}
+		if (!$anchor.length) {
+			$anchor = $side.find(".form-sidebar .user-image, .standard-sidebar .sidebar-image-wrapper").first();
+		}
+
+		if ($anchor.length) {
+			$anchor.after(block);
+			return true;
+		}
+
+		const $sb = $side.find(".form-sidebar .form-attachments, .form-sidebar").first();
+		if ($sb.length) {
+			$sb.prepend(block);
+			return true;
+		}
+
+		return false;
+	}
+
+	function pulse_inject_user_form_title_fallback(frm, doc) {
+		doc = doc || frm.doc;
+		const badge = pulse_presence_badge_html(doc);
+		const $area =
+			frm.page.wrapper.find(".page-head .title-area").first().length
+				? frm.page.wrapper.find(".page-head .title-area").first()
+				: frm.page.wrapper.find(".page-head").first();
+		if ($area.length) {
+			$area.append(
+				`<span class="pulse-form-presence" style="margin-left:10px;display:inline-block;vertical-align:middle;">${badge}</span>`
+			);
+			return true;
+		}
+		return false;
+	}
+
+	function pulse_place_user_form_presence(frm, merged) {
+		pulse_clear_user_form_pulse_ui(frm);
+		if (pulse_inject_user_form_main_banner(frm, merged)) {
+			return true;
+		}
+		if (pulse_inject_user_form_sidebar_badge(frm, merged)) {
+			return true;
+		}
+		return pulse_inject_user_form_title_fallback(frm, merged);
+	}
+
+	function pulse_refresh_open_user_form_presence() {
+		try {
+			const r = frappe.get_route && frappe.get_route();
+			if (!r || r[0] !== "Form" || r[1] !== "User" || !window.cur_frm || !cur_frm.doc || !cur_frm.doc.name) {
+				return;
+			}
+			const frm = cur_frm;
+			frappe.call({
+				method: "pulse_app.api.presence.desk_pulse_snapshot",
+				args: { users: JSON.stringify([frm.doc.name]) },
+				freeze: false,
+				callback: function (resp) {
+					const row = (resp.message || [])[0];
+					const merged = row ? Object.assign({}, frm.doc, row) : frm.doc;
+					pulse_place_user_form_presence(frm, merged);
+				},
+				error: function () {
+					pulse_place_user_form_presence(frm, frm.doc);
+				},
+			});
+		} catch (e) {
+			/* ignore */
+		}
 	}
 
 	function sync_cur_list_settings_to_global(s) {
@@ -126,67 +269,11 @@
 	window.jQuery(document).on("pulse_presence", function () {
 		try {
 			refresh_user_list_if_open();
+			pulse_refresh_open_user_form_presence();
 		} catch (e) {
 			/* ignore */
 		}
 	});
-
-	function pulse_inject_user_form_sidebar_badge(frm, doc) {
-		const $ = window.jQuery;
-		doc = doc || frm.doc;
-		const badge = pulse_presence_badge_html(doc);
-		const label = frappe.utils.escape_html(__("Pulse presence"));
-
-		const block = `
-			<div class="pulse-form-presence-wrap" style="margin: 0 -4px 14px; padding: 12px 8px 14px; text-align: center; border-bottom: 1px solid var(--border-color, rgba(0,0,0,0.08));">
-				<div class="text-muted small" style="margin-bottom: 8px; letter-spacing: 0.02em;">${label}</div>
-				<div class="pulse-form-presence-badge" style="display: inline-flex; justify-content: center; flex-wrap: wrap; gap: 6px; padding: 8px 10px; border-radius: var(--border-radius-lg, 10px); background: var(--control-bg, #f4f4f4);">
-					${badge}
-				</div>
-			</div>`;
-
-		const $side = frm.wrapper.find(".layout-side-section").first();
-		if (!$side.length) {
-			return false;
-		}
-
-		let $anchor = $side.find(".sidebar-image-section").first();
-		if (!$anchor.length) {
-			const $imgw = $side.find(".sidebar-image-wrapper").first();
-			if ($imgw.length) {
-				$anchor = $imgw.closest(".sidebar-image-section").length
-					? $imgw.closest(".sidebar-image-section")
-					: $imgw.parent();
-			}
-		}
-
-		if ($anchor.length) {
-			$anchor.after(block);
-			return true;
-		}
-
-		const $sb = $side.find(".form-sidebar .form-attachments, .form-sidebar").first();
-		if ($sb.length) {
-			$sb.prepend(block);
-			return true;
-		}
-
-		return false;
-	}
-
-	function pulse_inject_user_form_title_fallback(frm, doc) {
-		doc = doc || frm.doc;
-		const badge = pulse_presence_badge_html(doc);
-		const $area =
-			frm.page.wrapper.find(".page-head .title-area").first().length
-				? frm.page.wrapper.find(".page-head .title-area").first()
-				: frm.page.wrapper.find(".page-head").first();
-		if ($area.length) {
-			$area.append(
-				`<span class="pulse-form-presence" style="margin-left:10px;display:inline-block;vertical-align:middle;">${badge}</span>`
-			);
-		}
-	}
 
 	if (!window.__pulse_user_form_bound__) {
 		window.__pulse_user_form_bound__ = true;
@@ -200,12 +287,7 @@
 					return;
 				}
 
-				try {
-					frm.wrapper.find(".pulse-form-presence-wrap").remove();
-					frm.page.wrapper.find(".pulse-form-presence").remove();
-				} catch (e2) {
-					/* ignore */
-				}
+				pulse_clear_user_form_pulse_ui(frm);
 
 				frappe.call({
 					method: "pulse_app.api.presence.desk_pulse_snapshot",
@@ -217,19 +299,17 @@
 
 						let placed = false;
 						function attempt(n) {
-							frm.wrapper.find(".pulse-form-presence-wrap").remove();
-							if (pulse_inject_user_form_sidebar_badge(frm, merged)) {
+							pulse_clear_user_form_pulse_ui(frm);
+							if (pulse_place_user_form_presence(frm, merged)) {
 								placed = true;
 								return;
 							}
-							if (n < 6) {
+							if (n < 10) {
 								setTimeout(function () {
 									if (!placed) {
 										attempt(n + 1);
 									}
-								}, 120 * (n + 1));
-							} else if (!placed) {
-								pulse_inject_user_form_title_fallback(frm, merged);
+								}, 100 * (n + 1));
 							}
 						}
 						attempt(0);
@@ -237,19 +317,17 @@
 					error: function () {
 						let placed = false;
 						function attempt(n) {
-							frm.wrapper.find(".pulse-form-presence-wrap").remove();
-							if (pulse_inject_user_form_sidebar_badge(frm, frm.doc)) {
+							pulse_clear_user_form_pulse_ui(frm);
+							if (pulse_place_user_form_presence(frm, frm.doc)) {
 								placed = true;
 								return;
 							}
-							if (n < 3) {
+							if (n < 5) {
 								setTimeout(function () {
 									if (!placed) {
 										attempt(n + 1);
 									}
 								}, 150);
-							} else if (!placed) {
-								pulse_inject_user_form_title_fallback(frm, frm.doc);
 							}
 						}
 						attempt(0);
