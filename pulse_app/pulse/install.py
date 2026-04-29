@@ -115,6 +115,10 @@ def ensure_pulse_online_page():
 			}
 		)
 		doc.append("roles", {"role": "Desk User"})
+		# Page.validate требует developer_mode для новых записей — из migrate это блокировало insert.
+		doc.flags.ignore_validate = True
+		# JS из hooks page_js; не создавать файлы в модуле при insert/on_update.
+		doc.flags.do_not_update_json = True
 		doc.insert(ignore_permissions=True)
 	except Exception:
 		frappe.log_error(title="Pulse: ensure Page pulse-online", message=frappe.get_traceback())
