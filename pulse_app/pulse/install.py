@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import frappe
 from frappe.utils import get_datetime
 
@@ -91,8 +93,20 @@ def after_migrate():
 	ensure_sidebar()
 
 
+def _ensure_pulse_online_page_directory():
+	"""Во Frappe 16+ Page.load_assets вызывает os.listdir(..../page/<scrub>) без проверки — каталог должен быть."""
+	try:
+		from frappe.modules import get_module_path, scrub
+
+		dir_path = os.path.join(get_module_path("Pulse"), "page", scrub("pulse-online"))
+		os.makedirs(dir_path, exist_ok=True)
+	except Exception:
+		frappe.log_error(title="Pulse: ensure page directory pulse/page/pulse_online", message=frappe.get_traceback())
+
+
 def ensure_pulse_online_page():
 	"""Desk Page pulse-online — кастомная страница; JS подключается через hooks page_js."""
+	_ensure_pulse_online_page_directory()
 	if frappe.db.exists("Page", "pulse-online"):
 		# Раньше было standard=Yes без fixture в репозитории → Desk показывал «страница не найдена».
 		std = frappe.db.get_value("Page", "pulse-online", "standard")
