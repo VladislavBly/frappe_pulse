@@ -25,7 +25,9 @@ after_migrate = "pulse_app.pulse.install.after_migrate"
 # ------------
 before_request = ["pulse_app.utils.api_routes.handle_api_routes"]
 
-# Desk: Socket.IO + глобально user_pulse.js (иначе другие приложения перезаписывают listview_settings User)
+# Desk: Socket.IO + глобально user_pulse.js.
+# На проде желательно держать pulse_app последним в sites/apps.txt — иначе ERPNext снова перезапишет
+# frappe.listview_settings.User до загрузки скрипта (патч ListView в user_pulse.js это компенсирует).
 # ------------
 app_include_js = [
 	"/assets/pulse_app/js/pulse_socket.js",
