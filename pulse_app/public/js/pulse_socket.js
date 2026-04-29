@@ -43,7 +43,40 @@ pulse.http_mark_online = function () {
 		method: "pulse_app.api.presence.mark_online",
 		args: { service: "desk" },
 		freeze: false,
+		callback: function (r) {
+			if (r && r.exc) {
+				console.warn("Pulse mark_online:", r.exc);
+			}
+		},
+		error: function (xhr) {
+			console.warn("Pulse mark_online HTTP error", xhr && xhr.statusText);
+		},
 	});
+};
+
+/** Пока session/csrf не готовы, ранние вызовы молча noop — ждём и шлём один раз при готовности. */
+pulse._wait_desk_session_then_mark = function () {
+	let fired = false;
+	const deadline = Date.now() + 90000;
+	const tick = function () {
+		if (fired) {
+			return;
+		}
+		const ok =
+			frappe.session &&
+			frappe.session.user &&
+			frappe.session.user !== "Guest" &&
+			frappe.csrf_token;
+		if (ok) {
+			fired = true;
+			pulse.http_mark_online();
+			return;
+		}
+		if (Date.now() < deadline) {
+			setTimeout(tick, 400);
+		}
+	};
+	tick();
 };
 
 pulse.setup_presence_realtime = function () {
@@ -121,6 +154,7 @@ pulse.setup_presence_realtime = function () {
 };
 
 frappe.ready(function () {
+	pulse._wait_desk_session_then_mark();
 	pulse.setup_presence_realtime();
 	// Резервные вызовы mark_online (медленный/отсутствующий socket не должен оставлять Pulse пустым).
 	[900, 3500, 12000].forEach(function (ms) {
@@ -128,4 +162,8 @@ frappe.ready(function () {
 			pulse.http_mark_online();
 		}, ms);
 	});
+	// Heartbeat: окно «онлайн» 120 с на сервере — обновляем чаще, чтобы список User не залипал в «No data».
+	setInterval(function () {
+		pulse.http_mark_online();
+	}, 45000);
 });

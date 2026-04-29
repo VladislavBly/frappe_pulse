@@ -21,6 +21,14 @@ REALTIME_EVENT = "pulse_presence"
 _SERVICE_SAFE = re.compile(r"^[a-zA-Z0-9._:\-/]+$")
 
 
+def _publish_presence_event(payload: dict) -> None:
+	"""Realtime не должен откатывать запись присутствия при недоступном Redis / ошибке publish."""
+	try:
+		frappe.publish_realtime(REALTIME_EVENT, payload, after_commit=True)
+	except Exception:
+		frappe.log_error(title="Pulse: publish_realtime failed", message=frappe.get_traceback())
+
+
 def _user_presence_columns() -> set[str]:
 	return set(frappe.db.get_table_columns("User"))
 
@@ -110,14 +118,12 @@ def _clear_presence(user: str) -> None:
 def mark_offline_presence() -> dict:
 	user = _require_logged_in()
 	_clear_presence(user)
-	frappe.publish_realtime(
-		REALTIME_EVENT,
+	_publish_presence_event(
 		{
 			"kind": "offline",
 			"user": user,
 			"online_users": _online_users_snapshot(),
-		},
-		after_commit=True,
+		}
 	)
 	return {"offline": True, "user": user}
 
@@ -164,16 +170,14 @@ def mark_online_presence(*, service: str | None = None) -> dict:
 	user = _require_logged_in()
 	norm = normalize_presence_service(service)
 	row = _touch_presence_last_seen(user, service=norm)
-	frappe.publish_realtime(
-		REALTIME_EVENT,
+	_publish_presence_event(
 		{
 			"kind": "presence_update",
 			"user": user,
 			"last_seen_on": row.get("last_seen_on"),
 			"service": row.get("service"),
 			"online_users": _online_users_snapshot(),
-		},
-		after_commit=True,
+		}
 	)
 	return {"profile": row, "updated_at": now_datetime()}
 
