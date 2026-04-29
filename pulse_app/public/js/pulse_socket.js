@@ -2,6 +2,13 @@
 
 frappe.provide("pulse");
 
+// До первого List/User объект frappe.listview_settings.User должен существовать, иначе BaseList
+// берёт this.settings = {} (ссылка не на глобал), и позже formatters из pulse_app не видны.
+frappe.provide("frappe.listview_settings");
+if (!frappe.listview_settings.User) {
+	frappe.listview_settings.User = {};
+}
+
 pulse.PULSE_OFFLINE_URL = "/api/method/pulse_app.api.presence.mark_offline";
 
 /** POST с keepalive — доходит при закрытии вкладки (session cookie). */
