@@ -11,6 +11,44 @@ from pulse_app.pulse.modules.user_presence import service as pulse_service
 _ONLINE_WINDOW_SEC = getattr(pulse_service, "ONLINE_WINDOW_SEC", 120)
 
 
+def _session_events_for_pulse_page(limit: int = 40) -> list[dict]:
+	"""Login/Logout из Pulse Session Event; не‑админы видят только свои строки."""
+	from frappe.utils import cint, get_datetime
+
+	user = frappe.session.user
+	if not user or user == "Guest":
+		return []
+
+	limit = min(max(cint(limit) or 40, 1), 100)
+	if not frappe.db.exists("DocType", "Pulse Session Event"):
+		return []
+
+	is_mgr = "System Manager" in frappe.get_roles(user)
+	filters = None if is_mgr else {"user": user}
+
+	rows = frappe.get_all(
+		"Pulse Session Event",
+		filters=filters,
+		fields=["name", "user", "event_type", "occurred_on", "ip_address"],
+		order_by="occurred_on desc",
+		limit_page_length=limit,
+		ignore_permissions=True,
+	)
+	out = []
+	for r in rows:
+		oc = r.get("occurred_on")
+		out.append(
+			{
+				"id": r.get("name"),
+				"user": r.get("user"),
+				"event_type": r.get("event_type"),
+				"occurred_on": get_datetime(oc).isoformat() if oc else None,
+				"ip_address": ((r.get("ip_address") or "")[:80]),
+			}
+		)
+	return out
+
+
 def _extract_service_from_request():
 	"""GET/POST form, JSON body или frappe.call args."""
 	svc = frappe.form_dict.get("service")
@@ -112,4 +150,8 @@ def pulse_online_dashboard():
 		"online_window_sec": _ONLINE_WINDOW_SEC,
 		"server_time": now_datetime().isoformat(),
 		"current_user": frappe.session.user,
+		"session_events": _session_events_for_pulse_page(40),
+		"session_events_scope": "all"
+		if ("System Manager" in frappe.get_roles(frappe.session.user))
+		else "mine",
 	}
