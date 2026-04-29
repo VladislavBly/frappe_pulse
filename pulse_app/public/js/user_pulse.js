@@ -368,8 +368,20 @@
 		window.__pulse_user_form_bound__ = true;
 		frappe.ui.form.on("User", {
 			refresh(frm) {
-				frm.wrapper.find(".pulse-form-presence-wrap").remove();
-				frm.page.wrapper.find(".pulse-form-presence").remove();
+				try {
+					if (!frm || !frm.doc || !frm.doc.name) {
+						return;
+					}
+				} catch (e1) {
+					return;
+				}
+
+				try {
+					frm.wrapper.find(".pulse-form-presence-wrap").remove();
+					frm.page.wrapper.find(".pulse-form-presence").remove();
+				} catch (e2) {
+					/* ignore */
+				}
 
 				frappe.call({
 					method: "pulse_app.api.presence.desk_pulse_snapshot",

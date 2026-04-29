@@ -34,16 +34,21 @@ pulse.send_offline_beacon = function () {
 	}
 };
 
+/** HTTP fallback: если Socket.IO не поднимется, без этого поля User.pulse_last_seen_on останутся пустыми («No data»). */
+pulse.http_mark_online = function () {
+	if (!frappe.session || frappe.session.user === "Guest") {
+		return;
+	}
+	frappe.call({
+		method: "pulse_app.api.presence.mark_online",
+		args: { service: "desk" },
+		freeze: false,
+	});
+};
+
 pulse.setup_presence_realtime = function () {
 	function call_mark_online() {
-		if (!frappe.session || frappe.session.user === "Guest") {
-			return;
-		}
-		frappe.call({
-			method: "pulse_app.api.presence.mark_online",
-			args: { service: "desk" },
-			freeze: false,
-		});
+		pulse.http_mark_online();
 	}
 
 	function bind_socket(sock) {
@@ -88,15 +93,8 @@ pulse.setup_presence_realtime = function () {
 			if (list_user && cur_list.refresh) {
 				cur_list.refresh();
 			}
-			if (
-				window.cur_frm &&
-				cur_frm.doctype === "User" &&
-				data.user &&
-				cur_frm.docname === data.user &&
-				cur_frm.reload_doc
-			) {
-				cur_frm.reload_doc();
-			}
+			// Не вызывать cur_frm.reload_doc() на форме User — перезагрузка документа на каждое pulse_presence
+			// давала пустой/мигающий экран и гонки с отрисовкой полей.
 		} catch (e) {
 			// ignore
 		}
@@ -124,4 +122,10 @@ pulse.setup_presence_realtime = function () {
 
 frappe.ready(function () {
 	pulse.setup_presence_realtime();
+	// Резервные вызовы mark_online (медленный/отсутствующий socket не должен оставлять Pulse пустым).
+	[900, 3500, 12000].forEach(function (ms) {
+		setTimeout(function () {
+			pulse.http_mark_online();
+		}, ms);
+	});
 });

@@ -32,7 +32,4 @@ app_include_js = [
 	"/assets/pulse_app/js/user_pulse.js",
 ]
 
-# User: дублирующая подгрузка при открытии формы/списка
-# ------------
-doctype_js = {"User": "public/js/user_pulse.js"}
-doctype_list_js = {"User": "public/js/user_pulse.js"}
+# Только app_include_js — двойная загрузка User doctype_js ломала отрисовку формы у части сайтов.
