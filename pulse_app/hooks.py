@@ -31,5 +31,6 @@ app_include_js = [
 	"/assets/pulse_app/js/pulse_socket.js",
 ]
 
-# Страница «Pulse — онлайн» (список онлайн + Ping): скрипт подгружается только на этой странице.
+# Страница «Pulse — онлайн» (список онлайн + Ping): скрипт и стили только на этой странице.
 page_js = {"pulse-online": "public/js/pulse_online_page.js"}
+page_css = {"pulse-online": "public/css/pulse_online_page.css"}
