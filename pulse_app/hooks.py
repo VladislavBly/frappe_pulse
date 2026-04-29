@@ -29,6 +29,6 @@ before_request = ["pulse_app.utils.api_routes.handle_api_routes"]
 # ------------
 app_include_js = "/assets/pulse_app/js/pulse_socket.js"
 
-# User: колонка «Pulse last seen» + индикатор Online/Away в списке
+# User list: колонка Pulse + Online/Away — через doctype_list_js (на списке надёжнее, чем только doctype_js)
 # ------------
-doctype_js = {"User": "public/js/user_pulse.js"}
+doctype_list_js = {"User": "public/js/user_pulse.js"}

@@ -22,6 +22,7 @@ def ensure_pulse_user_custom_fields():
 				"fieldtype": "Datetime",
 				"insert_after": "last_login",
 				"read_only": 1,
+				"in_list_view": 1,
 				"description": "Updated when the user connects to Desk with Pulse (Socket.IO). Shown in User list as Online/Away.",
 			}
 		)
@@ -40,4 +41,20 @@ def after_install():
 
 def after_migrate():
 	ensure_pulse_user_custom_fields()
+	_ensure_pulse_user_field_in_list_view()
 	ensure_sidebar()
+
+
+def _ensure_pulse_user_field_in_list_view():
+	"""Уже созданное поле: включить показ в списке User (обновление со старых установок)."""
+	name = frappe.db.get_value(
+		"Custom Field",
+		{"dt": "User", "fieldname": "pulse_last_seen_on"},
+		"name",
+	)
+	if not name:
+		return
+	try:
+		frappe.db.set_value("Custom Field", name, "in_list_view", 1, update_modified=False)
+	except Exception:
+		pass
