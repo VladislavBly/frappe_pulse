@@ -24,7 +24,7 @@ Pulse adds:
 
 - **Presence** — last seen in DB, **who’s online** from live Socket.IO counts in Redis, optional **client/service tag** (`desk`, `portal`, `mobile`, …).
 - **Realtime** — `frappe.publish_realtime` → **`pulse_presence`** events on the standard Frappe **Socket.IO** path (Redis → Node realtime → browsers).
-- **Explicit offline** — tab close / logout paths call **`mark_offline`** so others aren’t stuck waiting for a timeout.
+- **Offline** — last Desk socket drives Redis-backed online list (Node **disconnect**); **`mark_offline`** on **Logout** clears DB last-seen (closing a tab alone does not call it, so multi-tab stays consistent).
 - **Session history plumbing** — `Pulse Session Event` (Login/Logout rows); wire your auth hooks when you’re ready.
 - **Desk UX** — workspace tile, `/app/pulse`, User list indicators, Custom Field on User for last seen.
 
@@ -36,7 +36,7 @@ Architecture follows the same **router → controllers → services** layering u
 
 | Area | What you get |
 |------|----------------|
-| **Desk** | Pulse app tile, workspace, Socket.IO connect → `mark_online` with `service: "desk"`, offline on pagehide/logout. |
+| **Desk** | Pulse app tile, workspace, Socket.IO connect → `mark_online` with `service: "desk"`; offline list updates via socket disconnect; **`mark_offline`** on logout. |
 | **REST** | `POST /api/pulse/presence/mark-online`, `mark-offline`, `GET .../presence/online`, `GET .../session-events`, plus whitelisted methods. |
 | **Realtime** | **`pulse_presence`**: tiny signal (`kind`, `user`, `service`, `rev`); full tables via authenticated HTTP. |
 | **Multi-client** | Pass a **`service`** string so you know which frontend reported presence. |
@@ -73,7 +73,7 @@ If the tile is missing: run **`migrate`** again, **`bench restart`**, **`bench -
 
 | Doc | Description |
 |-----|-------------|
-| **[docs/SETUP_AND_USAGE.md](docs/SETUP_AND_USAGE.md)** | Install, verify Desk, REST examples, troubleshooting. |
+| **[docs/SETUP_AND_USAGE.md](docs/SETUP_AND_USAGE.md)** | Install, verify Desk, REST examples, troubleshooting. **§2.5** — полная переустановка / обновление с GitHub на всех сайтах (готовый блок команд). |
 | **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | Layers, data model, API behaviour (also available in Russian in parts). |
 | **[docs/EXTERNAL_CLIENT.md](docs/EXTERNAL_CLIENT.md)** | External SPAs: REST auth, `service` field, Socket.IO notes. |
 

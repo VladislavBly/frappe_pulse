@@ -62,6 +62,11 @@ def _db_online_window_sec() -> int:
 		return ONLINE_WINDOW_SEC
 
 
+def user_list_online_window_sec() -> int:
+	"""Секунды для индикатора Online/Away в списке User (по ``pulse_last_seen_on``)."""
+	return _db_online_window_sec()
+
+
 def diagnostics_presence() -> dict:
 	"""Сводка для отладки пустого списка онлайн / журнала (см. pulse_presence_debug)."""
 	cols = _user_presence_columns()

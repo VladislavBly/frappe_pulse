@@ -36,6 +36,7 @@ before_request = ["pulse_app.utils.api_routes.handle_api_routes"]
 # ------------
 app_include_js = [
 	"/assets/pulse_app/js/pulse_socket.js",
+	"/assets/pulse_app/js/pulse_user_list.js",
 ]
 
 # Страница «Pulse — онлайн» (список онлайн + Ping): скрипт и стили только на этой странице.

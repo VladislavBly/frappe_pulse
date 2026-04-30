@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from pulse_app.pulse.modules.user_presence.service import effective_online_window_sec
+from pulse_app.pulse.modules.user_presence.service import (
+	effective_online_window_sec,
+	user_list_online_window_sec,
+)
 
 
 def extend_bootinfo(bootinfo):
@@ -10,4 +13,5 @@ def extend_bootinfo(bootinfo):
 		return
 	bootinfo["pulse"] = {
 		"online_window_sec": effective_online_window_sec(),
+		"user_list_online_window_sec": user_list_online_window_sec(),
 	}

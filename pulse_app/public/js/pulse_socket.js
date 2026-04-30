@@ -5,7 +5,7 @@ frappe.provide("pulse");
 
 pulse.PULSE_OFFLINE_URL = "/api/method/pulse_app.api.presence.mark_offline";
 
-/** Очередь mark_online: иначе mark_offline при pagehide может обработаться раньше уже отправленного mark_online. */
+/** Очередь mark_online: последовательные вызовы без гонок. */
 pulse._markOnlineChain = typeof Promise !== "undefined" ? Promise.resolve() : null;
 pulse._presenceClosing = false;
 
@@ -147,31 +147,32 @@ pulse.setup_presence_realtime = function () {
 		$(document).trigger("pulse_presence", data);
 	}
 
-	frappe.realtime.on("pulse_presence", on_pulse_presence);
+	function bind_realtime_presence() {
+		var rt = frappe.realtime;
+		if (rt && typeof rt.on === "function") {
+			rt.on("pulse_presence", on_pulse_presence);
+			return true;
+		}
+		return false;
+	}
+	if (!bind_realtime_presence()) {
+		var rtAttempts = 0;
+		var rtTimer = setInterval(function () {
+			rtAttempts += 1;
+			if (bind_realtime_presence() || rtAttempts >= 200) {
+				clearInterval(rtTimer);
+			}
+		}, 150);
+	}
 
+	/* Закрытие вкладки: не вызывать mark_offline — иначе лента показывает Offline, а Redis
+	   socket_ref ещё держит другие вкладки / сокет, и список «кто онлайн» расходится с лентой.
+	   Выход из Desk обрабатывает сервер (on_logout) + при желании beacon ниже. */
 	window.addEventListener("pagehide", function (ev) {
 		if (ev.persisted) {
 			return;
 		}
 		pulse._presenceClosing = true;
-		var flushMs = 550;
-		if (pulse._markOnlineChain) {
-			Promise.race([
-				pulse._markOnlineChain,
-				new Promise(function (resolve) {
-					setTimeout(resolve, flushMs);
-				}),
-			]).then(
-				function () {
-					pulse.send_offline_beacon();
-				},
-				function () {
-					pulse.send_offline_beacon();
-				}
-			);
-		} else {
-			pulse.send_offline_beacon();
-		}
 	});
 
 	if (frappe.app && typeof frappe.app.logout === "function") {
@@ -194,7 +195,12 @@ pulse.setup_presence_realtime = function () {
 	}
 };
 
-frappe.ready(function () {
+/** Desk под разные версии / порядок бандлов: ``frappe.ready`` может быть ещё не функцией. */
+function pulse_boot_desk() {
+	if (pulse._pulseDeskBooted) {
+		return;
+	}
+	pulse._pulseDeskBooted = true;
 	pulse._wait_desk_session_then_mark();
 	pulse.setup_presence_realtime();
 	window.addEventListener("load", function () {
@@ -202,4 +208,23 @@ frappe.ready(function () {
 			pulse.http_mark_online();
 		}, 500);
 	});
-});
+}
+
+(function pulse_schedule_desk_boot() {
+	if (typeof frappe !== "undefined" && typeof frappe.ready === "function") {
+		frappe.ready(pulse_boot_desk);
+		return;
+	}
+	function defer(fn) {
+		if (typeof jQuery !== "undefined") {
+			jQuery(fn);
+		} else if (document.readyState === "loading") {
+			document.addEventListener("DOMContentLoaded", fn);
+		} else {
+			setTimeout(fn, 0);
+		}
+	}
+	defer(function () {
+		setTimeout(pulse_boot_desk, 50);
+	});
+})();

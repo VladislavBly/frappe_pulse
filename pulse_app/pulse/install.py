@@ -87,8 +87,8 @@ def after_migrate():
 	ensure_pulse_user_custom_fields()
 	ensure_pulse_online_page()
 	sync_pulse_online_page_roles()
-	_ensure_pulse_user_field_in_list_view()
 	_hide_pulse_columns_from_user_list()
+	_ensure_pulse_user_field_in_list_view()
 	_sync_legacy_pulse_profile_into_user()
 	_remove_pulse_user_profile_doctype()
 	upgrade_pulse_workspace_if_legacy()
@@ -163,15 +163,14 @@ def ensure_pulse_online_page():
 
 
 def _hide_pulse_columns_from_user_list():
-	"""Не показывать поля Pulse в стандартном списке User (отдельная страница pulse-online)."""
-	for fn in ("pulse_last_seen_on", "pulse_presence_source"):
-		name = frappe.db.get_value("Custom Field", {"dt": "User", "fieldname": fn}, "name")
-		if not name:
-			continue
-		try:
-			frappe.db.set_value("Custom Field", name, "in_list_view", 0, update_modified=False)
-		except Exception:
-			pass
+	"""Убрать из списка User только метку клиента; ``pulse_last_seen_on`` нужен для Online/Away."""
+	name = frappe.db.get_value("Custom Field", {"dt": "User", "fieldname": "pulse_presence_source"}, "name")
+	if not name:
+		return
+	try:
+		frappe.db.set_value("Custom Field", name, "in_list_view", 0, update_modified=False)
+	except Exception:
+		pass
 
 
 def _ensure_pulse_user_field_in_list_view():

@@ -301,8 +301,8 @@ bench migrate
 
 | Что | Как |
 |-----|-----|
-| **«Онлайн» в списке пользователей** | Custom Field **`pulse_last_seen_on`**. В **`user_pulse.js`**: **`add_fields`** + **`get_indicator`** (Online / Away по **`ONLINE_WINDOW_SEC`**). |
-| **Офлайн сразу** | **`pulse_app.api.presence.mark_offline`** очищает last seen и шлёт **`pulse_presence`** с **`kind: offline`**. Вызывается из **`pulse_socket.js`** при **`pagehide`** (закрытие вкладки / уход со страницы) и перед **`frappe.app.logout`**. Остальные клиенты получают событие и **`cur_list.refresh()`** / **`reload_doc`** для открытой формы User — без ожидания истечения окна. |
+| **«Онлайн» в списке пользователей** | Поле **`pulse_last_seen_on`**. В **`pulse_user_list.js`**: **`add_fields`** + **`get_indicator`** (Online / Away по **`user_list_online_window_sec`** из boot, по умолчанию 120 с). |
+| **Офлайн для списка по сокетам** | При закрытии **последней** вкладки Desk срабатывает **disconnect** Socket.IO → Node уменьшает счётчик в Redis и при нуле шлёт **`pulse_presence`** (`offline`). **`mark_offline`** по HTTP не вызывается при **`pagehide`** (иначе при нескольких вкладках лента показывала бы Offline, а Redis всё ещё считал бы сессии). **`mark_offline`** остаётся при явном **выходе** (**`logout`**: клиентский beacon + хук **`on_logout`** на сервере). |
 | **Форма User** | Поле **Pulse last seen**; при realtime-событии по этому пользователю форма перезагружается. |
 | **История входов/выходов** | DocType **Pulse Session Event** имеет поле **User** → во вкладке **Connections** у записи User Frappe показывает связанные события (если включены стандартные связи). Отдельный встроенный Child Table в форме User мы не добавляли — можно открыть **Pulse Session Event** и фильтровать по пользователю или использовать отчёт. |
 

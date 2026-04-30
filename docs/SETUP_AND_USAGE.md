@@ -63,6 +63,40 @@ bench --site erp.example.com clear-cache
 
 После изменений в **`public/js`** иногда нужен **`bench build`** или очистка assets — зависит от версии Frappe и режима разработки.
 
+### 2.5. Полная переустановка или обновление с GitHub (все сайты)
+
+Готовый сценарий для сервера, где bench лежит в **`/home/frappe/frappe-bench`**, команды **`bench`** вызываются от пользователя **`frappe`**, а приложение ставится из **`main`** репозитория **frappe_pulse**. Подставьте свои пути и URL при необходимости.
+
+**Что делает скрипт:** на каждом сайте с `site_config.json` снимает приложение **`pulse_app`**, удаляет каталоги клона в **`apps`** (и **`frappe_pulse`**, и **`pulse_app`** — на случай разной раскладки), заново клонирует репозиторий, ставит приложение на все сайты, миграции, сборка фронта, перезапуск и очистка кэша.
+
+Выполняйте от **root** (или пользователя с `sudo`), если так заведён доступ к `frappe`:
+
+```bash
+# 1) Удалить приложение со всех сайтов (ошибки по сайтам без pulse_app можно игнорировать)
+sudo -u frappe -H bash -lc 'cd /home/frappe/frappe-bench && for d in sites/*/; do s=$(basename "$d"); test -f "sites/$s/site_config.json" || continue; echo "--- uninstall: $s ---"; /home/frappe/.local/bin/bench --site "$s" uninstall-app pulse_app --yes || true; done'
+
+# 2) Убрать старый код из apps
+sudo rm -rf /home/frappe/frappe-bench/apps/frappe_pulse /home/frappe/frappe-bench/apps/pulse_app
+
+# 3) Забрать свежий main с GitHub (--overwrite перезапишет при повторном клоне)
+sudo -u frappe -H bash -lc 'cd /home/frappe/frappe-bench && /home/frappe/.local/bin/bench get-app https://github.com/VladislavBly/frappe_pulse.git --branch main --overwrite --skip-assets'
+
+# 4) Установить приложение на каждый сайт
+sudo -u frappe -H bash -lc 'cd /home/frappe/frappe-bench && for d in sites/*/; do s=$(basename "$d"); test -f "sites/$s/site_config.json" || continue; echo "--- install: $s ---"; /home/frappe/.local/bin/bench --site "$s" install-app pulse_app || true; done'
+
+# 5) Миграции, сборка ассетов, перезапуск, кэш
+sudo -u frappe -H bash -lc 'cd /home/frappe/frappe-bench && /home/frappe/.local/bin/bench --site all migrate'
+sudo -u frappe -H bash -lc 'cd /home/frappe/frappe-bench && /home/frappe/.local/bin/bench build --app pulse_app'
+sudo -u frappe -H bash -lc 'cd /home/frappe/frappe-bench && /home/frappe/.local/bin/bench restart'
+sudo -u frappe -H bash -lc 'cd /home/frappe/frappe-bench && /home/frappe/.local/bin/bench --site all clear-cache'
+
+echo "Готово."
+```
+
+Если **`bench`** у вас в **`PATH`** у пользователя `frappe`, можно заменить **`/home/frappe/.local/bin/bench`** на **`bench`**.
+
+После обновления не забудьте: процесс **Socket.IO / realtime** должен быть запущен (он поднимается **`bench restart`** в типичной связке supervisor/systemd).
+
 ---
 
 ## 3. Проверка, что всё завелось
@@ -87,7 +121,7 @@ bench --site erp.example.com clear-cache
 3. Обновляются поля **Pulse last seen** / **Pulse presence source** у **User**.
 4. Остальные пользователи получают события **`pulse_presence`** и при открытом списке User видят обновления индикаторов (после обновления списка / realtime).
 
-При **выходе из Desk** или **закрытии вкладки** вызывается **`mark_offline`** — присутствие снимается, другим уходит **`kind: offline`**.
+При **явном выходе из Desk** (**Logout**) вызывается **`mark_offline`** — очищается last seen в БД и рассылается **`pulse_presence`** (`offline`). Закрытие одной вкладки **не** вызывает **`mark_offline`**, чтобы не расходились лента и список онлайн по Redis при **нескольких вкладках**; «ушёл со всех сокетов» определяет Node по **disconnect**.
 
 ### 4.1 Онлайн только по Socket.IO и каналу Redis `events`
 

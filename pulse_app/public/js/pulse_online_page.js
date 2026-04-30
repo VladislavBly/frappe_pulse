@@ -136,8 +136,12 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 			) {
 				console.info("[pulse] pulse_presence event", data);
 			}
-			appendLiveFeedEntry(data || {});
-			if (debouncedPresenceLoad) {
+			data = data || {};
+			appendLiveFeedEntry(data);
+			/* Событие offline от Node — сразу перечитать снимок, без ожидания debounce. */
+			if (data.kind === "offline") {
+				load(true);
+			} else if (debouncedPresenceLoad) {
 				debouncedPresenceLoad();
 			} else {
 				load(true);
