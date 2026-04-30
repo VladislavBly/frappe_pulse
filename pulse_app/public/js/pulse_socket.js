@@ -4,6 +4,10 @@ frappe.provide("pulse");
 
 pulse.PULSE_OFFLINE_URL = "/api/method/pulse_app.api.presence.mark_offline";
 
+/** Очередь mark_online: иначе mark_offline при pagehide может обработаться раньше, чем допишется уже отправленный mark_online — пользователь снова «онлайн». */
+pulse._markOnlineChain = typeof Promise !== "undefined" ? Promise.resolve() : null;
+pulse._presenceClosing = false;
+
 /** Единая точка: во Frappe 16 realtime и legacy socketio — один объект. */
 pulse._get_socket_io_socket = function () {
 	var rt = frappe.realtime || frappe.socketio;
@@ -22,18 +26,44 @@ pulse._heartbeat_ms = function () {
 };
 
 pulse.http_mark_online = function () {
+	if (pulse._presenceClosing) {
+		return;
+	}
 	if (!frappe.session || frappe.session.user === "Guest") {
 		return;
 	}
-	frappe.call({
-		method: "pulse_app.api.presence.mark_online",
-		args: { service: "desk" },
-		freeze: false,
-		error: function (r) {
-			if (frappe.boot && frappe.boot.developer_mode && window.console && console.error) {
-				console.error("[pulse_app] mark_online failed", r);
+	if (!pulse._markOnlineChain) {
+		frappe.call({
+			method: "pulse_app.api.presence.mark_online",
+			args: { service: "desk" },
+			freeze: false,
+			error: function (r) {
+				if (frappe.boot && frappe.boot.developer_mode && window.console && console.error) {
+					console.error("[pulse_app] mark_online failed", r);
+				}
+			},
+		});
+		return;
+	}
+	pulse._markOnlineChain = pulse._markOnlineChain.then(function () {
+		return new Promise(function (resolve) {
+			if (pulse._presenceClosing) {
+				resolve();
+				return;
 			}
-		},
+			frappe.call({
+				method: "pulse_app.api.presence.mark_online",
+				args: { service: "desk" },
+				freeze: false,
+				callback: resolve,
+				error: function (r) {
+					if (frappe.boot && frappe.boot.developer_mode && window.console && console.error) {
+						console.error("[pulse_app] mark_online failed", r);
+					}
+					resolve();
+				},
+			});
+		});
 	});
 };
 
@@ -130,12 +160,31 @@ pulse.setup_presence_realtime = function () {
 		if (ev.persisted) {
 			return;
 		}
-		pulse.send_offline_beacon();
+		pulse._presenceClosing = true;
+		var flushMs = 550;
+		if (pulse._markOnlineChain) {
+			Promise.race([
+				pulse._markOnlineChain,
+				new Promise(function (resolve) {
+					setTimeout(resolve, flushMs);
+				}),
+			]).then(
+				function () {
+					pulse.send_offline_beacon();
+				},
+				function () {
+					pulse.send_offline_beacon();
+				}
+			);
+		} else {
+			pulse.send_offline_beacon();
+		}
 	});
 
 	if (frappe.app && typeof frappe.app.logout === "function") {
 		var _logout = frappe.app.logout.bind(frappe.app);
 		frappe.app.logout = function () {
+			pulse._presenceClosing = true;
 			pulse.send_offline_beacon();
 			return _logout.apply(this, arguments);
 		};
