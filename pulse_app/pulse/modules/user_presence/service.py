@@ -1,7 +1,8 @@
 """Присутствие через realtime (publish_realtime), список онлайн, журнал сессий.
 
-«Кто онлайн»: при включённом Redis ключи с TTL дополняются снимком из User.pulse_last_seen_on,
-чтобы список не был пустым, если SETEX/scan недоступны.
+Список «кто онлайн» на дашборде берётся из режима ``online_snapshot_mode()``:
+при ``pulse_redis_presence`` по умолчанию **redis_only** — только активные ключи Redis
+(канал Pulse / heartbeat), без окна по полю User в БД; см. ``pulse_online_snapshot_mode``.
 """
 
 from __future__ import annotations
@@ -87,6 +88,29 @@ def _merge_online_rows(a: list[dict], b: list[dict]) -> list[dict]:
 	return out
 
 
+def online_snapshot_mode() -> str:
+	"""
+	Откуда строится список «кто онлайн» для дашборда.
+
+	- ``redis_only`` — только активные ключи Redis Pulse (канал heartbeat / TTL).
+	- ``db_only`` — только окно по полю User.pulse_last_seen_on.
+	- ``merged`` — объединение Redis и БД (запасной вариант).
+
+	По умолчанию при включённом ``pulse_redis_presence`` — ``redis_only``.
+	"""
+	raw = (frappe.conf.get("pulse_online_snapshot_mode") or "").strip().lower()
+	if raw in ("redis_only", "merged", "db_only"):
+		return raw
+	try:
+		from pulse_app.pulse.modules.user_presence import redis_presence
+
+		if redis_presence.redis_presence_enabled():
+			return "redis_only"
+	except Exception:
+		pass
+	return "db_only"
+
+
 def diagnostics_presence() -> dict:
 	"""Сводка для отладки пустого списка онлайн / журнала (см. pulse_presence_debug)."""
 	cols = _user_presence_columns()
@@ -115,6 +139,7 @@ def diagnostics_presence() -> dict:
 		merged_len = -1
 		redis_err = (redis_err or "") + "\n" + frappe.get_traceback()[-600:]
 	return {
+		"online_snapshot_mode": online_snapshot_mode(),
 		"has_pulse_last_seen_on": has_ls,
 		"has_pulse_presence_source": has_src,
 		"pulse_session_event_doctype": dt_exists,
@@ -328,21 +353,38 @@ def _online_users_snapshot_redis() -> list[dict]:
 
 
 def _online_users_snapshot() -> list[dict]:
+	mode = online_snapshot_mode()
 	db_rows = _online_users_snapshot_db()
+
+	if mode == "db_only":
+		return db_rows
+
 	try:
 		from pulse_app.pulse.modules.user_presence import redis_presence
 
-		if not redis_presence.redis_presence_enabled():
+		redis_on = redis_presence.redis_presence_enabled()
+	except Exception:
+		frappe.log_error(title="Pulse: online snapshot mode redis check", message=frappe.get_traceback())
+		redis_on = False
+
+	if mode == "redis_only":
+		if not redis_on:
 			return db_rows
 		try:
-			redis_rows = _online_users_snapshot_redis()
+			return _online_users_snapshot_redis()
 		except Exception:
-			frappe.log_error(title="Pulse: Redis snapshot failed (using DB only)", message=frappe.get_traceback())
-			redis_rows = []
-		return _merge_online_rows(redis_rows, db_rows)
-	except Exception:
-		frappe.log_error(title="Pulse: Redis snapshot fallback", message=frappe.get_traceback())
+			frappe.log_error(title="Pulse: Redis snapshot failed (redis_only)", message=frappe.get_traceback())
+			return []
+
+	# merged
+	if not redis_on:
 		return db_rows
+	try:
+		redis_rows = _online_users_snapshot_redis()
+	except Exception:
+		frappe.log_error(title="Pulse: Redis snapshot failed (using DB only)", message=frappe.get_traceback())
+		redis_rows = []
+	return _merge_online_rows(redis_rows, db_rows)
 
 
 def mark_online_presence(*, service: str | None = None) -> dict:

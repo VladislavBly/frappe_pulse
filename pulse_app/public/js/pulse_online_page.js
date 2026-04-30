@@ -225,6 +225,20 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 				? pulse_online_escape(String(msg.presence_rev))
 				: null;
 
+		const listSrc = msg.online_list_source || "";
+		function onlineListSourceHint(mode) {
+			if (mode === "redis_only") {
+				return __("Who is online: Redis only (active Pulse channel keys), not DB window.");
+			}
+			if (mode === "merged") {
+				return __("Who is online: Redis keys merged with DB time window.");
+			}
+			if (mode === "db_only") {
+				return __("Who is online: DB window on User pulse_last_seen_on.");
+			}
+			return "";
+		}
+
 		const rows =
 			users.length > 0
 				? users
@@ -347,6 +361,11 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 			"</div>" +
 			"</div>" +
 			"</div>" +
+			(listSrc
+				? '<p class="text-muted small mb-3 pulse-online-list-source">' +
+				  pulse_online_escape(onlineListSourceHint(listSrc)) +
+				  "</p>"
+				: "") +
 			'<div class="pulse-online-card pulse-online-live-feed-card">' +
 			'<div class="pulse-online-card-head">' +
 			"<span><i class=\"fa fa-bolt fa-fw\"></i> " +

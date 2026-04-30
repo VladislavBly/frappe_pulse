@@ -101,6 +101,7 @@ bench --site erp.example.com clear-cache
 | **`pulse_redis_ttl_seconds`** | TTL ключа в секундах (например `45`; должен быть **больше** интервала heartbeat) |
 | **`pulse_heartbeat_ms`** | Интервал вызова **`mark_online`** из Desk в миллисекундах (минимум **5000**, по умолчанию **15000**) |
 | **`pulse_online_window_sec`** | Окно для режима **без** Redis (только БД) |
+| **`pulse_online_snapshot_mode`** | Откуда список «кто онлайн» на странице Pulse: **`redis_only`** (только активные ключи Redis — клиент недавно слал Pulse **`mark_online`** / heartbeat), **`db_only`** (только поле User в БД), **`merged`** (Redis ∪ БД). Если ключ не задан: при **`pulse_redis_presence`** — **`redis_only`**, иначе **`db_only`**. Это не список сокетов из Node; при необходимости «ровно по Socket.IO» нужны отдельные хуки в **`frappe/realtime`**. |
 
 После правок: **`bench restart`** и **`bench --site … clear-cache`**. В браузере в **`frappe.boot.pulse`** появятся флаги **`redis_presence`**, **`heartbeat_ms`**, **`redis_ttl_sec`**, **`online_window_sec`** — страница **pulse-online** и список онлайн используют **`effective_online_window_sec()`**, чтобы окно совпадало с TTL в Redis-режиме.
 

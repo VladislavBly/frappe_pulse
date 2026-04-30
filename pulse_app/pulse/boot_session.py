@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import frappe
 
-from pulse_app.pulse.modules.user_presence.service import ONLINE_WINDOW_SEC
+from pulse_app.pulse.modules.user_presence.service import ONLINE_WINDOW_SEC, online_snapshot_mode
 
 
 def extend_bootinfo(bootinfo):
@@ -20,4 +20,5 @@ def extend_bootinfo(bootinfo):
 		"heartbeat_ms": max(hb, 5000),
 		"redis_ttl_sec": ttl,
 		"online_window_sec": win,
+		"online_snapshot_mode": online_snapshot_mode(),
 	}
