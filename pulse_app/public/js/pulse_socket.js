@@ -201,6 +201,17 @@ pulse.setup_presence_realtime = function () {
 			/* ignore */
 		}
 	}
+
+	/* Фоновые вкладки: браузер режет setInterval → heartbeat реже TTL Redis. При возврате — сразу mark_online. */
+	document.addEventListener("visibilitychange", function () {
+		if (document.visibilityState !== "visible") {
+			return;
+		}
+		if (pulse._presenceClosing) {
+			return;
+		}
+		pulse.http_mark_online();
+	});
 };
 
 frappe.ready(function () {

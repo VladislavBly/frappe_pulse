@@ -17,11 +17,12 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 	let lastRefreshAt = null;
 	let loadSeq = 0;
 
+	/** После pulse_presence обновить таблицу (не чаще чем раз в interval ms). */
 	const debouncedPresenceLoad =
 		frappe.utils.debounce &&
 		frappe.utils.debounce(function () {
 			load(true);
-		}, 380);
+		}, 200);
 
 	function feedStorageKey() {
 		return "pulse_live_activity_" + (frappe.session.user || "guest");
@@ -513,14 +514,27 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 	}
 	frappe.pages["pulse-online"]._pollTimer = setInterval(function () {
 		load(false);
-	}, 20000);
+	}, 8000);
 
 	if (frappe.pages["pulse-online"]._liveUiTimer) {
 		clearInterval(frappe.pages["pulse-online"]._liveUiTimer);
 	}
 	frappe.pages["pulse-online"]._liveUiTimer = setInterval(updateLiveStrip, 4000);
 
+	document.addEventListener("visibilitychange", function () {
+		if (document.visibilityState !== "visible") {
+			return;
+		}
+		load(false);
+		if (typeof pulse !== "undefined" && pulse && typeof pulse.http_mark_online === "function") {
+			pulse.http_mark_online();
+		}
+	});
+
 	load(false);
+	if (typeof pulse !== "undefined" && pulse && typeof pulse.http_mark_online === "function") {
+		pulse.http_mark_online();
+	}
 };
 
 frappe.pages["pulse-online"].on_page_hide = function () {
