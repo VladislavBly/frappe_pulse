@@ -11,13 +11,6 @@
  "name": "Pulse",
  "public": 1,
  "sequence_id": 92,
- "shortcuts": [
-  {
-   "label": "Socket Monitor",
-   "link_to": "socket-monitor",
-   "type": "Page",
-   "icon": "plug"
-  }
- ],
+ "shortcuts": [],
  "title": "Pulse"
 }

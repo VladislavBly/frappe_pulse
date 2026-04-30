@@ -197,7 +197,7 @@ def ensure_app_desktop_icon() -> None:
 def _build_sidebar_rows() -> list[dict]:
 	if not frappe.db.exists("Workspace", WORKSPACE_NAME):
 		return []
-	rows = [
+	return [
 		{
 			"type": "Link",
 			"label": "Home",
@@ -206,14 +206,3 @@ def _build_sidebar_rows() -> list[dict]:
 			"icon": "home",
 		}
 	]
-	if frappe.db.exists("Page", "socket-monitor"):
-		rows.append(
-			{
-				"type": "Link",
-				"label": "Socket Monitor",
-				"link_type": "Page",
-				"link_to": "socket-monitor",
-				"icon": "plug",
-			}
-		)
-	return rows
