@@ -46,29 +46,30 @@ curl -sS -X POST 'https://YOUR_SITE/api/pulse/presence/mark-online' \
 
 Раздача идёт через **штатный стек Frappe**: Redis → процесс **Node (Socket.IO)** → браузеры / клиенты.
 
+**Почему не «просто сырой WebSocket»:** у Frappe единая авторизация сокета (cookie / секрет), комнаты сайта и пользователя и очередь через Redis уже реализованы в **`publish_realtime`**. Отдельный голый WS-канал обошёл бы это и усложнил безопасность. Имеющийся путь — тот же Socket.IO, что у Desk.
+
 Имя события: **`pulse_presence`**.
 
-Типичная полезная нагрузка **`pulse_presence`** (без полного списка онлайн — чтобы не светить его всем подписчикам Desk):
+Намеренно **короткое** тело (сигнал «что-то изменилось» + счётчик **`rev`**). Полный список онлайн и журнал сессий забираются только по **HTTP** с проверкой прав (например **`pulse_online_dashboard`** или **`GET .../presence/online`** для ролей из **`pulse_online_dashboard_roles`**).
+
+Примеры полезной нагрузки:
 
 ```json
 {
   "kind": "presence_update",
   "user": "user@example.com",
-  "last_seen_on": "...",
-  "service": "portal-spa"
+  "service": "portal-spa",
+  "rev": 1247
 }
 ```
 
 ```json
 {
   "kind": "offline",
-  "user": "user@example.com"
+  "user": "user@example.com",
+  "rev": 1248
 }
 ```
-
-Полный снимок страницы «Pulse — онлайн» (список онлайн, журнал сессий и т.д.) сервер шлёт отдельным событием **`pulse_online_snapshot`** только в комнаты пользователей с ролями из **`pulse_online_dashboard_roles`** (по умолчанию **System Manager**). Подключение к Socket.IO как у Desk; без этих ролей событие не приходит.
-
-Для произвольного клиента со списком онлайн по-прежнему можно вызывать **REST** `GET /api/pulse/presence/online`, если у сессии есть доступ (те же роли), либо whitelist-метод **`pulse_online_dashboard`**.
 
 Подписчики Desk уже слушают в **`pulse_socket.js`**. Внешнему SPA нужно подключиться к **тому же Socket.IO-серверу**, что и сайт (с учётом multitenancy: **namespace `/<sitename>`** в актуальных версиях Frappe).
 
@@ -82,12 +83,8 @@ const socket = io(`${window.location.origin}/${frappe?.boot?.sitename ?? "sitena
 });
 
 socket.on("pulse_presence", (payload) => {
-  console.log(payload.kind, payload.user, payload.service);
-});
-
-socket.on("pulse_online_snapshot", (payload) => {
-  /* только для пользователей с ролями дашборда */
-  console.log(payload.online_users, payload.session_events);
+  console.log(payload.kind, payload.user, payload.service, payload.rev);
+  /* затем GET pulse_online_dashboard или /presence/online при наличии прав */
 });
 ```
 

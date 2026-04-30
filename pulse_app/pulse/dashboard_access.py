@@ -1,4 +1,4 @@
-"""Кто может видеть страницу Pulse — онлайн, REST-снимок и событие pulse_online_snapshot."""
+"""Кто может видеть страницу Pulse — онлайн и REST-снимок «кто онлайн»."""
 
 from __future__ import annotations
 
@@ -37,18 +37,3 @@ def user_can_view_pulse_online_dashboard(user: str | None) -> bool:
 def viewer_sees_all_pulse_session_events(viewer: str) -> bool:
 	"""Журнал Login/Logout целиком — тем же ролям, что и доступ к дашборду."""
 	return user_can_view_pulse_online_dashboard(viewer)
-
-
-def iter_pulse_online_dashboard_viewers() -> list[str]:
-	"""Включённые User, у которых есть хотя бы одна из ролей дашборда."""
-	seen: set[str] = set()
-	out: list[str] = []
-	for role in get_pulse_online_dashboard_roles():
-		for u in frappe.get_all("Has Role", filters={"role": role, "parenttype": "User"}, pluck="parent"):
-			if not u or u in seen:
-				continue
-			if not frappe.db.get_value("User", u, "enabled"):
-				continue
-			seen.add(u)
-			out.append(u)
-	return out

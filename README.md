@@ -38,7 +38,7 @@ Architecture follows the same **router → controllers → services** layering u
 |------|----------------|
 | **Desk** | Pulse app tile, workspace, Socket.IO connect → `mark_online` with `service: "desk"`, offline on pagehide/logout. |
 | **REST** | `POST /api/pulse/presence/mark-online`, `mark-offline`, `GET .../presence/online`, `GET .../session-events`, plus whitelisted methods. |
-| **Realtime** | **`pulse_presence`**: `kind`, `user`, `service`, `last_seen_on`. Full dashboard JSON via **`pulse_online_snapshot`** (Socket.IO, role-gated). |
+| **Realtime** | **`pulse_presence`**: tiny signal (`kind`, `user`, `service`, `rev`); full tables via authenticated HTTP. |
 | **Multi-client** | Pass a **`service`** string so you know which frontend reported presence. |
 | **Data model** | Extends stock **User** (`pulse_last_seen_on`, `pulse_presence_source`); session history in **Pulse Session Event** only. |
 

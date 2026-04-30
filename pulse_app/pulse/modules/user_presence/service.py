@@ -20,17 +20,37 @@ REALTIME_EVENT = "pulse_presence"
 _SERVICE_SAFE = re.compile(r"^[a-zA-Z0-9._:\-/]+$")
 
 
-def _publish_admin_dashboard_snapshots_lazy() -> None:
-	"""Полный JSON страницы Pulse — онлайн через Socket.IO (только viewer с ролями)."""
-	try:
-		from pulse_app.api.presence import publish_pulse_online_dashboard_snapshots
+def _presence_rev_cache_key() -> str:
+	return f"pulse_app:presence_rev:{frappe.local.site}"
 
-		publish_pulse_online_dashboard_snapshots()
+
+def bump_presence_revision() -> int:
+	"""Монотонный счётчик для сокета: клиенты по rev понимают, что снимок на сервере сменился."""
+	key = _presence_rev_cache_key()
+	cache = frappe.cache()
+	try:
+		val = cache.incr(key)
+		if val is not None:
+			return int(val)
 	except Exception:
-		frappe.log_error(
-			title="Pulse: publish_pulse_online_dashboard_snapshots",
-			message=frappe.get_traceback(),
-		)
+		pass
+	try:
+		cur = int(cache.get(key) or 0)
+		nxt = cur + 1
+		cache.set(key, nxt)
+		return nxt
+	except Exception:
+		return int(now_datetime().timestamp())
+
+
+def current_presence_revision() -> int | None:
+	try:
+		raw = frappe.cache().get(_presence_rev_cache_key())
+		if raw is None:
+			return None
+		return int(raw)
+	except Exception:
+		return None
 
 
 def _db_online_window_sec() -> int:
@@ -111,9 +131,11 @@ def diagnostics_presence() -> dict:
 
 
 def _publish_presence_event(payload: dict) -> None:
-	"""Realtime не должен откатывать запись присутствия при недоступном Redis / ошибке publish."""
+	"""Только короткий сигнал по штатному Socket.IO Frappe; полные данные — через HTTP API."""
+	msg = dict(payload)
+	msg["rev"] = bump_presence_revision()
 	try:
-		frappe.publish_realtime(REALTIME_EVENT, payload, after_commit=True)
+		frappe.publish_realtime(REALTIME_EVENT, msg, after_commit=True)
 	except Exception:
 		frappe.log_error(title="Pulse: publish_realtime failed", message=frappe.get_traceback())
 
@@ -243,7 +265,6 @@ def mark_offline_presence() -> dict:
 			"user": user,
 		}
 	)
-	_publish_admin_dashboard_snapshots_lazy()
 	return {"offline": True, "user": user}
 
 
@@ -343,16 +364,14 @@ def mark_online_presence(*, service: str | None = None) -> dict:
 		{
 			"kind": "presence_update",
 			"user": user,
-			"last_seen_on": row.get("last_seen_on"),
 			"service": row.get("service"),
 		}
 	)
-	_publish_admin_dashboard_snapshots_lazy()
 	return {"profile": row, "updated_at": now_datetime()}
 
 
 def get_online_users_snapshot_internal() -> list[dict]:
-	"""Снимок «кто онлайн» без проверки сессии (рассылка админам по сокету)."""
+	"""Снимок «кто онлайн» без проверки сессии (сборка ответа pulse_online_dashboard на сервере)."""
 	return _online_users_snapshot()
 
 

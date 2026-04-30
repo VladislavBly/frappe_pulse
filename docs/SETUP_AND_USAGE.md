@@ -80,7 +80,7 @@ bench --site erp.example.com clear-cache
 
 Ничего отдельно включать в настройках Pulse не нужно.
 
-**Доступ к странице «Pulse — онлайн», API `pulse_online_dashboard`, REST `GET .../presence/online` и событию Socket.IO `pulse_online_snapshot`** ограничен ролями из **`pulse_online_dashboard_roles`** в `site_config.json` (по умолчанию только **System Manager**). Пример для нескольких ролей: `"pulse_online_dashboard_roles": ["System Manager", "Pulse Monitor"]`. После правки **`migrate`** синхронизирует роли на записи **Page pulse-online**.
+**Доступ к странице «Pulse — онлайн», API `pulse_online_dashboard` и REST `GET .../presence/online`** ограничен ролями из **`pulse_online_dashboard_roles`** в `site_config.json` (по умолчанию только **System Manager**). По Socket.IO всем Desk приходит только короткое **`pulse_presence`** (`rev`, пользователь, тип); полные таблицы страница подгружает по HTTP. Пример ролей: `"pulse_online_dashboard_roles": ["System Manager", "Pulse Monitor"]`. После правки **`migrate`** синхронизирует роли на записи **Page pulse-online**.
 
 1. Пользователь входит в **Desk** как обычно.
 2. Поднимается **Socket.IO** — скрипт **`pulse_socket.js`** вызывает **`mark_online`** с **`service: "desk"`**.

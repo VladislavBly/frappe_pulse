@@ -7,13 +7,10 @@ import json
 import frappe
 
 from pulse_app.pulse.dashboard_access import (
-	iter_pulse_online_dashboard_viewers,
 	user_can_view_pulse_online_dashboard,
 	viewer_sees_all_pulse_session_events,
 )
 from pulse_app.pulse.modules.user_presence import service as pulse_service
-
-REALTIME_SNAPSHOT_EVENT = "pulse_online_snapshot"
 
 
 def _session_events_for_viewer(viewer: str, limit: int = 40) -> list[dict]:
@@ -81,16 +78,12 @@ def build_pulse_online_dashboard_payload(for_viewer: str) -> dict:
 		"session_events": _session_events_for_viewer(for_viewer, 80),
 		"session_events_scope": "all" if viewer_sees_all_pulse_session_events(for_viewer) else "mine",
 	}
+	pr = pulse_service.current_presence_revision()
+	if pr is not None:
+		payload["presence_rev"] = pr
 	if frappe.conf.get("pulse_presence_debug") or frappe.conf.get("developer_mode"):
 		payload["_pulse_debug"] = pulse_service.diagnostics_presence()
 	return payload
-
-
-def publish_pulse_online_dashboard_snapshots() -> None:
-	"""Полный снимок страницы Pulse — онлайн только подключённым viewer с нужными ролями (после commit)."""
-	for viewer in iter_pulse_online_dashboard_viewers():
-		payload = build_pulse_online_dashboard_payload(viewer)
-		frappe.publish_realtime(REALTIME_SNAPSHOT_EVENT, payload, user=viewer, after_commit=True)
 
 
 def _extract_service_from_request():
@@ -179,8 +172,8 @@ def pulse_online_dashboard():
 	Страница «Pulse — онлайн»: список пользователей в окне онлайна + метаданные для UI.
 
 	Доступ только пользователям с ролями из ``pulse_online_dashboard_roles``
-	(по умолчанию **System Manager**). Полный снимок также шлётся в Socket.IO как
-	``pulse_online_snapshot`` (только в комнаты этих пользователей).
+	(по умолчанию **System Manager**). По Socket.IO приходит только короткое
+	``pulse_presence`` (в т.ч. ``rev``); эту страницу после сигнала обновляет HTTP.
 	"""
 	if frappe.session.user == "Guest":
 		frappe.throw(frappe._("Not permitted"), frappe.PermissionError)

@@ -46,6 +46,7 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 				kind: data.kind || "pulse_presence",
 				user: data.user || "",
 				service: data.service || "",
+				rev: data.rev != null && data.rev !== "" ? String(data.rev) : "",
 			});
 			sessionStorage.setItem(key, JSON.stringify(arr.slice(0, 80)));
 		} catch (e) {
@@ -59,14 +60,15 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 			: "";
 		const u = row.user || "—";
 		const svc = row.service ? " · " + row.service : "";
+		const rv = row.rev ? " · rev " + row.rev : "";
 		const k = row.kind || "";
 		let msg = "";
 		if (k === "offline") {
-			msg = t + " · " + __("Offline") + " · " + u;
+			msg = t + " · " + __("Offline") + " · " + u + svc + rv;
 		} else if (k === "presence_update") {
-			msg = t + " · " + __("Presence") + " · " + u + svc;
+			msg = t + " · " + __("Presence") + " · " + u + svc + rv;
 		} else {
-			msg = t + " · " + k + " · " + u + svc;
+			msg = t + " · " + k + " · " + u + svc + rv;
 		}
 		return pulse_online_escape(msg);
 	}
@@ -122,19 +124,6 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 		frappe.pages["pulse-online"]._pulseRtHandler = null;
 	}
 
-	function prevSnapshotCleanup() {
-		const prev = frappe.pages["pulse-online"]._pulseSnapshotHandler;
-		if (!prev) {
-			return;
-		}
-		try {
-			frappe.realtime.off("pulse_online_snapshot", prev);
-		} catch (e) {
-			/* ignore */
-		}
-		frappe.pages["pulse-online"]._pulseSnapshotHandler = null;
-	}
-
 	function bindRealtime() {
 		prevHandlerCleanup();
 		function onPresence(data) {
@@ -156,30 +145,6 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 		}
 		frappe.pages["pulse-online"]._pulseRtHandler = onPresence;
 		frappe.realtime.on("pulse_presence", onPresence);
-	}
-
-	/** Полный JSON страницы (только пользователи с ролями дашборда); см. pulse_online_dashboard на сервере. */
-	function bindSnapshotRealtime() {
-		prevSnapshotCleanup();
-		function onSnapshot(msg) {
-			if (!msg || typeof msg !== "object") {
-				return;
-			}
-			if (
-				window.console &&
-				console.info &&
-				((frappe.boot && frappe.boot.developer_mode) ||
-					(typeof localStorage !== "undefined" &&
-						localStorage.getItem("pulse_presence_debug") === "1"))
-			) {
-				console.info("[pulse] pulse_online_snapshot", msg);
-			}
-			lastRefreshAt = new Date();
-			render(msg, true);
-			updateLiveStrip();
-		}
-		frappe.pages["pulse-online"]._pulseSnapshotHandler = onSnapshot;
-		frappe.realtime.on("pulse_online_snapshot", onSnapshot);
 	}
 
 	function flashToolbar() {
@@ -255,6 +220,10 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 		const events = msg.session_events || [];
 		const scope = msg.session_events_scope || "mine";
 		const onlineCount = users.length;
+		const presenceRev =
+			msg.presence_rev != null && msg.presence_rev !== ""
+				? pulse_online_escape(String(msg.presence_rev))
+				: null;
 
 		const rows =
 			users.length > 0
@@ -341,7 +310,15 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 			"</div>" +
 			'<div class="pulse-online-meta">' +
 			__("Updated") +
-			': <span class="pulse-online-refreshed-at">—</span></div>' +
+			': <span class="pulse-online-refreshed-at">—</span>' +
+			(presenceRev
+				? ' · <span class="text-muted" title="' +
+				  pulse_online_escape(__("Presence revision from server (socket signal counter)")) +
+				  '">rev ' +
+				  presenceRev +
+				  "</span>"
+				: "") +
+			"</div>" +
 			"</div>" +
 			'<div class="pulse-online-hero">' +
 			'<div class="pulse-online-stat">' +
@@ -381,7 +358,9 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 			"</div>" +
 			'<p class="pulse-online-live-feed-hint">' +
 			pulse_online_escape(
-				__("Live stream of pulse_presence from Socket.IO (stored in this browser until cleared).")
+				__(
+					"Short Socket.IO signals (kind, user, service, rev). Who is online / history: loaded via authenticated API after each signal."
+				)
 			) +
 			"</p>" +
 			'<ul class="pulse-online-live-feed-list"></ul>' +
@@ -545,7 +524,6 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 	page.add_inner_button(__("Clear live feed"), clearLiveFeed);
 
 	bindRealtime();
-	bindSnapshotRealtime();
 
 	if (frappe.pages["pulse-online"]._pollTimer) {
 		clearInterval(frappe.pages["pulse-online"]._pollTimer);
@@ -592,14 +570,5 @@ frappe.pages["pulse-online"].on_page_hide = function () {
 			/* ignore */
 		}
 		frappe.pages["pulse-online"]._pulseRtHandler = null;
-	}
-	const sh = frappe.pages["pulse-online"]._pulseSnapshotHandler;
-	if (sh) {
-		try {
-			frappe.realtime.off("pulse_online_snapshot", sh);
-		} catch (e) {
-			/* ignore */
-		}
-		frappe.pages["pulse-online"]._pulseSnapshotHandler = null;
 	}
 };

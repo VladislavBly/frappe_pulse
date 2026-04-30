@@ -38,7 +38,7 @@ Pulse добавляет:
 |---------|----------|
 | **Desk** | Плитка Pulse, workspace, при connect Socket.IO → `mark_online` с `service: "desk"`, офлайн при pagehide/logout. |
 | **REST** | `POST .../mark-online`, `mark-offline`, `GET .../presence/online`, `GET .../session-events`, whitelist-методы. |
-| **Realtime** | **`pulse_presence`**: `kind`, `user`, `service`, `last_seen_on`. Полный JSON страницы — **`pulse_online_snapshot`** (только пользователи с ролями дашборда). |
+| **Realtime** | **`pulse_presence`**: короткий сигнал (`kind`, `user`, `service`, `rev`); таблицы — по HTTP с правами. |
 | **Несколько фронтов** | Поле **`service`** — откуда пришло присутствие. |
 | **Данные** | Расширение штатного **User** (`pulse_last_seen_on`, `pulse_presence_source`); журнал только в **Pulse Session Event**. |
 
