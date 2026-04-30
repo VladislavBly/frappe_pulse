@@ -12,6 +12,17 @@ SIDEBAR_TITLE = "Pulse"
 WORKSPACE_NAME = "Pulse"
 
 
+def _ensure_workspace_type_field(ws) -> None:
+	"""Frappe v15+: у Workspace обязательное поле type (Workspace | Link | URL)."""
+	try:
+		if not frappe.get_meta("Workspace").has_field("type"):
+			return
+	except Exception:
+		return
+	if not (getattr(ws, "type", None) or "").strip():
+		ws.type = "Workspace"
+
+
 def sanitize_pulse_workspace_payload(data: dict) -> dict:
 	"""Ярлыки только на существующие DocType или Page (migrate-порядок)."""
 	shortcuts = []
@@ -35,6 +46,11 @@ def sanitize_pulse_workspace_payload(data: dict) -> dict:
 	for s in shortcuts:
 		items.append({"type": "shortcut", "data": {"shortcut_name": s.get("label"), "col": "4"}})
 	data["content"] = json.dumps(items)
+	try:
+		if frappe.get_meta("Workspace").has_field("type"):
+			data.setdefault("type", "Workspace")
+	except Exception:
+		pass
 	return data
 
 
@@ -97,6 +113,7 @@ def upgrade_pulse_workspace_if_legacy() -> None:
 	for s in data.get("shortcuts", []):
 		ws.append("shortcuts", s)
 	ws.content = data.get("content")
+	_ensure_workspace_type_field(ws)
 	try:
 		ws.save(ignore_permissions=True)
 	except Exception:
@@ -144,6 +161,7 @@ def sync_pulse_workspace_shortcuts_from_app() -> None:
 		for row in data.get("shortcuts") or []:
 			ws.append("shortcuts", row)
 		ws.content = data.get("content")
+		_ensure_workspace_type_field(ws)
 		ws.save(ignore_permissions=True)
 	except Exception:
 		frappe.log_error(title="pulse_app: sync_pulse_workspace_shortcuts_from_app", message=frappe.get_traceback())
