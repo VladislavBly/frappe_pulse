@@ -1,11 +1,10 @@
-"""before_request: dispatch /api/pulse/* to PulseRouter (same layering idea as edoc_app.utils.api_routes)."""
+"""before_request: dispatch /api/pulse/* to PulseRouter."""
 
 from __future__ import annotations
 
 import frappe
 
-# Import route modules so @router.route decorators run.
-import pulse_app.http.routes.presence  # noqa: F401
+import pulse_app.http.routes.sample  # noqa: F401 — register routes
 from pulse_app.core.router import router
 
 router.build()

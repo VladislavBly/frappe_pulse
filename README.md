@@ -1,96 +1,29 @@
-<div align="center">
+# Pulse (`pulse_app`)
 
-# Pulse
+Skeleton [Frappe](https://frappeframework.com/) app: **Workspace Pulse**, **`PulseRouter`** under `/api/pulse/*`, HTTP route modules, and **`pulse/modules/<name>/`** with **service** + **controller** layers.
 
-**Real-time user presence for [Frappe](https://frappeframework.com/)**
+## Layout
 
-Know who’s online, where they connected from, and push updates over the same Socket.IO stack Desk already uses — without bolting on a separate presence microservice.
+- `pulse_app/core/router/` — `PulseRouter`, `router`, `dispatch`
+- `pulse_app/http/routes/` — register paths with `router.route(...)` + `bind(Controller, "method")`
+- `pulse_app/pulse/modules/sample/` — example `service.py` / `controller.py`
+- `pulse_app/pulse/workspace/pulse/pulse.json` — Desk workspace definition
+- `pulse_app/pulse/setup/workspace_sidebar.py` — sidebar + app tile sync on install/migrate
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Frappe](https://img.shields.io/badge/Frappe-App-green.svg)](https://github.com/frappe/frappe)
-
-[Русский](README.ru.md) · [Documentation](#documentation)
-
-</div>
-
----
-
-## Why Pulse?
-
-Frappe gives you great auth and Desk — but not a batteries-included **“who’s online now”** story that works for **Desk**, **custom SPAs**, and **REST** clients under one model.
-
-Pulse adds:
-
-- **Presence** — last seen in DB, **who’s online** from live Socket.IO counts in Redis, optional **client/service tag** (`desk`, `portal`, `mobile`, …).
-- **Realtime** — `frappe.publish_realtime` → **`pulse_presence`** events on the standard Frappe **Socket.IO** path (Redis → Node realtime → browsers).
-- **Offline** — last Desk socket drives Redis-backed online list (Node **disconnect**); **`mark_offline`** on **Logout** clears DB last-seen (closing a tab alone does not call it, so multi-tab stays consistent).
-- **Session history plumbing** — `Pulse Session Event` (Login/Logout rows); wire your auth hooks when you’re ready.
-- **Desk UX** — workspace tile, `/app/pulse`, User list indicators, Custom Field on User for last seen.
-
-Architecture follows the same **router → controllers → services** layering used in larger Frappe apps (clear routes under `/api/pulse/*`, JSON envelopes, testable services).
-
----
-
-## Features at a glance
-
-| Area | What you get |
-|------|----------------|
-| **Desk** | Pulse app tile, workspace, Socket.IO connect → `mark_online` with `service: "desk"`; offline list updates via socket disconnect; **`mark_offline`** on logout. |
-| **REST** | `POST /api/pulse/presence/mark-online`, `mark-offline`, `GET .../presence/online`, `GET .../session-events`, plus whitelisted methods. |
-| **Realtime** | **`pulse_presence`**: tiny signal (`kind`, `user`, `service`, `rev`); full tables via authenticated HTTP. |
-| **Multi-client** | Pass a **`service`** string so you know which frontend reported presence. |
-| **Data model** | Extends stock **User** (`pulse_last_seen_on`, `pulse_presence_source`); session history in **Pulse Session Event** only. |
-
----
-
-## Requirements
-
-- **Frappe / bench** site with Redis (standard stack).
-- **Socket.IO / realtime** process running (`bench start` / your supervisor setup) — same as any Frappe realtime feature.
-
----
-
-## Quick install
+## Install
 
 ```bash
-cd /path/to/frappe-bench
-bench get-app https://github.com/VladislavBly/frappe_pulse.git ./apps/frappe_pulse
-# or: bench get-app /absolute/path/to/frappe_pulse/pulse_app
-
-bench --site yoursite.com install-app pulse_app
-bench --site yoursite.com migrate
-bench restart
+bench get-app /path/to/frappe_pulse/pulse_app
+bench --site yours install-app pulse_app
+bench --site yours migrate
 ```
 
-After migrate you should see the **Pulse** app on the Desk app screen and workspace route **`/app/pulse`**.
+## API smoke test
 
-If the tile is missing: run **`migrate`** again, **`bench restart`**, **`bench --site yoursite.com clear-cache`**.
+Authenticated session cookie as usual for Desk; then:
 
----
-
-## Documentation
-
-| Doc | Description |
-|-----|-------------|
-| **[docs/SETUP_AND_USAGE.md](docs/SETUP_AND_USAGE.md)** | Install, verify Desk, REST examples, troubleshooting. **§2.5** — полная переустановка / обновление с GitHub на всех сайтах (готовый блок команд). |
-| **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | Layers, data model, API behaviour (also available in Russian in parts). |
-| **[docs/EXTERNAL_CLIENT.md](docs/EXTERNAL_CLIENT.md)** | External SPAs: REST auth, `service` field, Socket.IO notes. |
-
----
-
-## Contributing
-
-Issues and PRs are welcome. Please keep changes focused; match existing patterns (router, controllers, services). Add or update **docs** when behaviour or API surface changes.
-
----
+`GET /api/pulse/health` → JSON envelope `{"data":{"status":"ok","app":"pulse_app"}}`.
 
 ## License
 
-**MIT** — see [pulse_app/hooks.py](pulse_app/hooks.py) `app_license` and this repository.
-
----
-
-<p align="center">
-  Built for teams who ship on Frappe and still want modern presence semantics.
-</p>
+MIT — see `pulse_app/hooks.py`.

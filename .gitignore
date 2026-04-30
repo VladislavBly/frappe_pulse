@@ -8,3 +8,6 @@ build/
 .env
 .venv/
 venv/
+
+# Local MCP / browser debug dumps
+.playwright-mcp/

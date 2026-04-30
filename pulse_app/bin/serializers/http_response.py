@@ -21,12 +21,7 @@ def json_response(data: dict | list, status: int = 200):
 	return Response(body, mimetype="application/json", status=status)
 
 
-def json_response_list(data: list, total: int, status: int = 200):
-	body = json.dumps({"data": json_serial(data), "total": total}, ensure_ascii=False)
-	return Response(body, mimetype="application/json", status=status)
-
-
-def error_code_by_status(status: int) -> str:
+def _error_code(status: int) -> str:
 	if status == 401:
 		return "UNAUTHORIZED"
 	if status == 403:
@@ -35,8 +30,6 @@ def error_code_by_status(status: int) -> str:
 		return "NOT_FOUND"
 	if status == 422:
 		return "VALIDATION_ERROR"
-	if status == 400:
-		return "BAD_REQUEST"
 	if status >= 500:
 		return "INTERNAL_ERROR"
 	return "BAD_REQUEST"
@@ -48,11 +41,8 @@ def json_error(
 	code: str | None = None,
 	*,
 	headers: dict[str, str] | None = None,
-	debug: dict | None = None,
 ):
-	err_code = code or error_code_by_status(status)
-	payload: dict = {"error": {"code": err_code, "message": message}}
-	if debug:
-		payload["debug"] = json_serial(debug)
+	err_code = code or _error_code(status)
+	payload = {"error": {"code": err_code, "message": message}}
 	body = json.dumps(payload, ensure_ascii=False)
 	return Response(body, mimetype="application/json", status=status, headers=headers or None)

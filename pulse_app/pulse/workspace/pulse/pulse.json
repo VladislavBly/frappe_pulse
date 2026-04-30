@@ -1,6 +1,6 @@
 {
  "app": "pulse_app",
- "content": "[{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pulse Session Event\",\"col\":\"4\"}},{\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Pulse — онлайн\",\"col\":\"4\"}}]",
+ "content": "[]",
  "doctype": "Workspace",
  "type": "Workspace",
  "icon": "activity",
@@ -11,18 +11,6 @@
  "name": "Pulse",
  "public": 1,
  "sequence_id": 92,
- "shortcuts": [
-  {
-   "doc_view": "List",
-   "label": "Pulse Session Event",
-   "link_to": "Pulse Session Event",
-   "type": "DocType"
-  },
-  {
-   "label": "Pulse — онлайн",
-   "link_to": "pulse-online",
-   "type": "Page"
-  }
- ],
+ "shortcuts": [],
  "title": "Pulse"
 }

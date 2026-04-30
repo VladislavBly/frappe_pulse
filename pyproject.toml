@@ -1,7 +1,7 @@
 [project]
 name = "pulse_app"
 authors = [{ name = "Pulse", email = "pulse@example.com" }]
-description = "User presence, session history, and Pulse extensions for Frappe."
+description = "Pulse Frappe app skeleton: router, HTTP routes, modules (service/controller), workspace."
 requires-python = ">=3.10"
 readme = "README.md"
 dynamic = ["version"]

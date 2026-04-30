@@ -1,4 +1,4 @@
-"""Desk v16: Workspace Sidebar + привязка плитки приложения (как edoc_app)."""
+"""Desk: Workspace Sidebar + app tile (minimal Pulse workspace)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ WORKSPACE_NAME = "Pulse"
 
 
 def _ensure_workspace_type_field(ws) -> None:
-	"""Frappe v15+: у Workspace обязательное поле type (Workspace | Link | URL)."""
 	try:
 		if not frappe.get_meta("Workspace").has_field("type"):
 			return
@@ -24,7 +23,7 @@ def _ensure_workspace_type_field(ws) -> None:
 
 
 def sanitize_pulse_workspace_payload(data: dict) -> dict:
-	"""Ярлыки только на существующие DocType или Page (migrate-порядок)."""
+	"""Keep shortcuts only for DocTypes/Pages that exist in this site."""
 	shortcuts = []
 	for row in data.get("shortcuts") or []:
 		lt = row.get("link_to")
@@ -35,12 +34,6 @@ def sanitize_pulse_workspace_payload(data: dict) -> dict:
 			shortcuts.append(row)
 		elif t == "Page" and frappe.db.exists("Page", lt):
 			shortcuts.append(row)
-	if not shortcuts:
-		shortcuts = [
-			{"doc_view": "List", "label": "Pulse Session Event", "link_to": "Pulse Session Event", "type": "DocType"},
-		]
-		if frappe.db.exists("Page", "pulse-online"):
-			shortcuts.append({"label": "Pulse — онлайн", "link_to": "pulse-online", "type": "Page"})
 	data["shortcuts"] = shortcuts
 	items = []
 	for s in shortcuts:
@@ -55,7 +48,6 @@ def sanitize_pulse_workspace_payload(data: dict) -> dict:
 
 
 def ensure_sidebar() -> None:
-	"""Создать/обновить Workspace Sidebar Pulse и синхронизировать Desktop Icon."""
 	if not frappe.db.has_table("Workspace Sidebar"):
 		return
 
@@ -89,39 +81,7 @@ def ensure_sidebar() -> None:
 	_sync_desktop_icons_after_sidebar()
 
 
-def upgrade_pulse_workspace_if_legacy() -> None:
-	"""Убрать ярлык Pulse User Profile из сохранённого Workspace после перехода на поля User."""
-	if not frappe.db.exists("Workspace", WORKSPACE_NAME):
-		return
-	path = frappe.get_app_path("pulse_app", "pulse", "workspace", "pulse", "pulse.json")
-	if not os.path.isfile(path):
-		return
-	with open(path, encoding="utf-8") as f:
-		data = json.load(f)
-	data = sanitize_pulse_workspace_payload(data)
-	ws = frappe.get_doc("Workspace", WORKSPACE_NAME)
-	legacy = False
-	for ch in ws.shortcuts or []:
-		if getattr(ch, "link_to", None) == "Pulse User Profile":
-			legacy = True
-			break
-	if not legacy and ws.content and "Pulse User Profile" in ws.content:
-		legacy = True
-	if not legacy:
-		return
-	ws.shortcuts = []
-	for s in data.get("shortcuts", []):
-		ws.append("shortcuts", s)
-	ws.content = data.get("content")
-	_ensure_workspace_type_field(ws)
-	try:
-		ws.save(ignore_permissions=True)
-	except Exception:
-		frappe.log_error(title="pulse_app: upgrade_pulse_workspace_if_legacy save", message=frappe.get_traceback())
-
-
 def ensure_pulse_workspace_record() -> None:
-	"""Импорт Workspace из JSON, если migrate не подтянул файл."""
 	if frappe.db.exists("Workspace", WORKSPACE_NAME):
 		return
 
@@ -141,7 +101,6 @@ def ensure_pulse_workspace_record() -> None:
 
 
 def sync_pulse_workspace_shortcuts_from_app() -> None:
-	"""Обновить ярлыки Workspace Pulse из pulse.json (новая страница pulse-online и т.д.)."""
 	if not frappe.db.exists("Workspace", WORKSPACE_NAME):
 		return
 	path = os.path.join(
@@ -184,7 +143,6 @@ def _sync_desktop_icons_after_sidebar() -> None:
 
 
 def ensure_app_desktop_icon() -> None:
-	"""Плитка в сетке приложений: App + External + route из add_to_apps_screen."""
 	if not frappe.db.has_table("Desktop Icon"):
 		return
 	if APP_NAME not in frappe.get_installed_apps():
@@ -237,43 +195,14 @@ def ensure_app_desktop_icon() -> None:
 
 
 def _build_sidebar_rows() -> list[dict]:
-	rows: list[dict] = []
-
-	def section(title: str) -> None:
-		rows.append({"type": "Section Break", "label": title, "collapsible": 1})
-
-	def doctype_link(label: str, doctype: str) -> None:
-		rows.append(
-			{
-				"type": "Link",
-				"label": label,
-				"link_type": "DocType",
-				"link_to": doctype,
-			}
-		)
-
-	if frappe.db.exists("Workspace", WORKSPACE_NAME):
-		rows.append(
-			{
-				"type": "Link",
-				"label": "Home",
-				"link_type": "Workspace",
-				"link_to": WORKSPACE_NAME,
-				"icon": "home",
-			}
-		)
-
-	section("Pulse")
-	if frappe.db.exists("DocType", "Pulse Session Event"):
-		doctype_link("Pulse Session Event", "Pulse Session Event")
-	if frappe.db.exists("Page", "pulse-online"):
-		rows.append(
-			{
-				"type": "Link",
-				"label": "Pulse — онлайн",
-				"link_type": "Page",
-				"link_to": "pulse-online",
-			}
-		)
-
-	return rows
+	if not frappe.db.exists("Workspace", WORKSPACE_NAME):
+		return []
+	return [
+		{
+			"type": "Link",
+			"label": "Home",
+			"link_type": "Workspace",
+			"link_to": WORKSPACE_NAME,
+			"icon": "home",
+		}
+	]
