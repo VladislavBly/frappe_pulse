@@ -87,6 +87,23 @@ bench --site erp.example.com clear-cache
 
 При **выходе из Desk** или **закрытии вкладки** вызывается **`mark_offline`** — присутствие снимается, другим уходит **`kind: offline`**.
 
+### 4.1 Redis-присутствие (TTL + heartbeat)
+
+По умолчанию «кто онлайн» считается по полю **User.pulse_last_seen_on** в окне **`pulse_online_window_sec`** (см. `service.ONLINE_WINDOW_SEC` в коде). Для схемы «last seen + TTL без вечного онлайна» включите запись ключей в Redis — тот же экземпляр, что использует `frappe.cache()`:
+
+В **`sites/your-site/site_config.json`**:
+
+| Ключ | Значение |
+|------|----------|
+| **`pulse_redis_presence`** | `1` — включить ключи `pulse_app:presence:v1:{site}:…` с **SETEX** |
+| **`pulse_redis_ttl_seconds`** | TTL ключа в секундах (например `45`; должен быть **больше** интервала heartbeat) |
+| **`pulse_heartbeat_ms`** | Интервал вызова **`mark_online`** из Desk в миллисекундах (минимум **5000**, по умолчанию **15000**) |
+| **`pulse_online_window_sec`** | Окно для режима **без** Redis (только БД) |
+
+После правок: **`bench restart`** и **`bench --site … clear-cache`**. В браузере в **`frappe.boot.pulse`** появятся флаги **`redis_presence`**, **`heartbeat_ms`**, **`redis_ttl_sec`**, **`online_window_sec`** — страница **pulse-online** и список онлайн используют **`effective_online_window_sec()`**, чтобы окно совпадало с TTL в Redis-режиме.
+
+Дублирующий метод API: **`pulse_app.api.presence.heartbeat`** — то же, что **`mark_online`** (удобно для внешних клиентов).
+
 ---
 
 ## 5. Использование через REST (curl / Postman / свой бэкенд)
@@ -105,7 +122,9 @@ curl -sS -c cookies.txt -X POST "$SITE/api/method/login" \
 
 Дальше подставляйте **`cookies.txt`** в запросы (`-b cookies.txt`).
 
-### 5.2. Отметить онлайн (внешний сервис)
+### 5.2. Отметить онлайн / heartbeat (внешний сервис)
+
+Тот же смысл: **`mark-online`** и **`heartbeat`** (POST).
 
 ```bash
 curl -sS -X POST "$SITE/api/pulse/presence/mark-online" \

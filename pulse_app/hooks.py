@@ -25,6 +25,9 @@ after_migrate = "pulse_app.pulse.install.after_migrate"
 on_login = "pulse_app.pulse.auth_hooks.on_login"
 on_logout = "pulse_app.pulse.auth_hooks.on_logout"
 
+# Desk bootinfo: интервал heartbeat и режим Redis-присутствия → frappe.boot.pulse
+boot_session = "pulse_app.pulse.boot_session.extend_bootinfo"
+
 # Request routing (custom REST under /api/pulse/*)
 # ------------
 before_request = ["pulse_app.utils.api_routes.handle_api_routes"]

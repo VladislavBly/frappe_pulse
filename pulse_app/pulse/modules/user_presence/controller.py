@@ -24,6 +24,10 @@ class PulseUserPresenceController:
 		svc = body.get("service")
 		return json_response(service.mark_online_presence(service=svc))
 
+	def heartbeat(self) -> Response:
+		"""POST /api/pulse/presence/heartbeat — то же, что mark-online (Redis/TTL heartbeat)."""
+		return self.mark_online()
+
 	def mark_offline(self) -> Response:
 		"""POST /api/pulse/presence/mark-offline."""
 		user = frappe.session.user

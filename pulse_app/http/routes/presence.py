@@ -10,6 +10,10 @@ router.route("/api/pulse/presence/mark-online", methods=["POST"], rollback=True)
 	bind(PulseUserPresenceController, "mark_online"),
 )
 
+router.route("/api/pulse/presence/heartbeat", methods=["POST"], rollback=True)(
+	bind(PulseUserPresenceController, "heartbeat"),
+)
+
 router.route("/api/pulse/presence/mark-offline", methods=["POST"], rollback=True)(
 	bind(PulseUserPresenceController, "mark_offline"),
 )

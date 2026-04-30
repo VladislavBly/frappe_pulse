@@ -8,8 +8,6 @@ import frappe
 
 from pulse_app.pulse.modules.user_presence import service as pulse_service
 
-_ONLINE_WINDOW_SEC = getattr(pulse_service, "ONLINE_WINDOW_SEC", 120)
-
 
 def _session_events_for_pulse_page(limit: int = 40) -> list[dict]:
 	"""Login/Logout из Pulse Session Event; не‑админы видят только свои строки."""
@@ -75,6 +73,12 @@ def mark_online(service=None):
 	"""
 	svc = service if service not in (None, "") else _extract_service_from_request()
 	return pulse_service.mark_online_presence(service=svc)
+
+
+@frappe.whitelist()
+def heartbeat(service=None):
+	"""Синоним ``mark_online`` для клиентского heartbeat по вашей схеме Redis/TTL."""
+	return mark_online(service=service)
 
 
 @frappe.whitelist()
@@ -147,7 +151,7 @@ def pulse_online_dashboard():
 
 	return {
 		"online_users": out,
-		"online_window_sec": _ONLINE_WINDOW_SEC,
+		"online_window_sec": pulse_service.effective_online_window_sec(),
 		"server_time": now_datetime().isoformat(),
 		"current_user": frappe.session.user,
 		"session_events": _session_events_for_pulse_page(80),

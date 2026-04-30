@@ -13,6 +13,14 @@ pulse._get_socket_io_socket = function () {
 	return null;
 };
 
+pulse._heartbeat_ms = function () {
+	var p = frappe.boot && frappe.boot.pulse;
+	if (p && p.heartbeat_ms) {
+		return Math.max(5000, parseInt(p.heartbeat_ms, 10) || 15000);
+	}
+	return 15000;
+};
+
 pulse.http_mark_online = function () {
 	if (!frappe.session || frappe.session.user === "Guest") {
 		return;
@@ -161,5 +169,5 @@ frappe.ready(function () {
 	});
 	setInterval(function () {
 		pulse.http_mark_online();
-	}, 25000);
+	}, pulse._heartbeat_ms());
 });
