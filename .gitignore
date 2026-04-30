@@ -9,5 +9,7 @@ build/
 .venv/
 venv/
 
+presence_ws/node_modules/
+
 # Local MCP / browser debug dumps
 .playwright-mcp/

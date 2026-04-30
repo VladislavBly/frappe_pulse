@@ -1,0 +1,27 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - presence_ws_redis:/data
+    command: redis-server --appendonly yes
+
+  presence-ws:
+    build: .
+    image: presence-ws:local
+    ports:
+      - "${PRESENCE_WS_PORT:-8765}:8765"
+    environment:
+      PORT: "8765"
+      HOST: "0.0.0.0"
+      REDIS_URL: redis://redis:6379
+      PRESENCE_TENANT: "${PRESENCE_TENANT:-default}"
+      PRESENCE_SERVICE_ID: "${PRESENCE_SERVICE_ID:-presence-ws}"
+      # Optional: enable kick / kickAll over WebSocket (see README)
+      # ADMIN_TOKEN: "long-random-secret"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+volumes:
+  presence_ws_redis:

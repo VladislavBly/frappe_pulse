@@ -1,0 +1,20 @@
+{
+	"name": "presence-ws",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Minimal WebSocket server for presence / realtime (Docker-ready)",
+	"main": "server.js",
+	"scripts": {
+		"start": "node server.js",
+		"cli": "node cli.js",
+		"health": "node health.js",
+		"stats": "node health.js"
+	},
+	"engines": {
+		"node": ">=20"
+	},
+	"dependencies": {
+		"redis": "^4.7.0",
+		"ws": "^8.18.0"
+	}
+}

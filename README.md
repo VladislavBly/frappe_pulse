@@ -1,3 +1,13 @@
+# frappe_pulse
+
+Монорепозиторий: Frappe-приложение **Pulse** и отдельный **WebSocket-сервис** для будущего presence.
+
+## `presence_ws`
+
+Node.js WebSocket + `GET /health`, консольный клиент (`npm run cli`), Docker — см. [`presence_ws/README.md`](presence_ws/README.md).
+
+---
+
 # Pulse (`pulse_app`)
 
 Frappe-приложение в том же стиле, что **`edoc_app`** (`edoc_frappe_app/edoc_app`): **Workspace Pulse** в Desk и **HTTP API** через архитектурный слой **`Router`** на **Werkzeug `Map`/`Rule`** (singleton **`router`**).
