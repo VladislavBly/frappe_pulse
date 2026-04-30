@@ -1,10 +1,11 @@
-// Pulse: Socket.IO → mark_online; offline beacon; realtime pulse_presence (Desk + страница pulse-online).
+// Pulse: Socket.IO → mark_online при подключении (БД last_seen); realtime pulse_presence;
+// Список онлайн — только счётчики Socket.IO в Redis; push — канал Redis ``events`` → Socket.IO.
 
 frappe.provide("pulse");
 
 pulse.PULSE_OFFLINE_URL = "/api/method/pulse_app.api.presence.mark_offline";
 
-/** Очередь mark_online: иначе mark_offline при pagehide может обработаться раньше, чем допишется уже отправленный mark_online — пользователь снова «онлайн». */
+/** Очередь mark_online: иначе mark_offline при pagehide может обработаться раньше уже отправленного mark_online. */
 pulse._markOnlineChain = typeof Promise !== "undefined" ? Promise.resolve() : null;
 pulse._presenceClosing = false;
 
@@ -15,14 +16,6 @@ pulse._get_socket_io_socket = function () {
 		return rt.socket;
 	}
 	return null;
-};
-
-pulse._heartbeat_ms = function () {
-	var p = frappe.boot && frappe.boot.pulse;
-	if (p && p.heartbeat_ms) {
-		return Math.max(5000, parseInt(p.heartbeat_ms, 10) || 15000);
-	}
-	return 15000;
 };
 
 pulse.http_mark_online = function () {
@@ -190,44 +183,23 @@ pulse.setup_presence_realtime = function () {
 		};
 	}
 
-	// SPA Desk: при смене маршрута сессия уже есть — обновить присутствие.
-	function on_route_change() {
-		setTimeout(call_mark_online, 400);
-	}
 	if (frappe.router && typeof frappe.router.on === "function") {
 		try {
-			frappe.router.on("change", on_route_change);
+			frappe.router.on("change", function () {
+				setTimeout(call_mark_online, 400);
+			});
 		} catch (e) {
 			/* ignore */
 		}
 	}
-
-	/* Фоновые вкладки: браузер режет setInterval → heartbeat реже TTL Redis. При возврате — сразу mark_online. */
-	document.addEventListener("visibilitychange", function () {
-		if (document.visibilityState !== "visible") {
-			return;
-		}
-		if (pulse._presenceClosing) {
-			return;
-		}
-		pulse.http_mark_online();
-	});
 };
 
 frappe.ready(function () {
 	pulse._wait_desk_session_then_mark();
 	pulse.setup_presence_realtime();
-	[400, 900, 2000, 3500, 8000, 12000].forEach(function (ms) {
-		setTimeout(function () {
-			pulse.http_mark_online();
-		}, ms);
-	});
 	window.addEventListener("load", function () {
 		setTimeout(function () {
 			pulse.http_mark_online();
 		}, 500);
 	});
-	setInterval(function () {
-		pulse.http_mark_online();
-	}, pulse._heartbeat_ms());
 });

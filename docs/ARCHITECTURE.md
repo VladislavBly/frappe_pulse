@@ -9,7 +9,7 @@
 **Pulse** — Frappe-приложение для:
 
 - учёта **последней активности** пользователя («last seen»);
-- отображения списка пользователей, считающихся **онлайн** (по порогу времени после последнего обновления при подключении Socket.IO);
+- отображения списка пользователей **онлайн** по активным подключениям Socket.IO (Redis-счётчики);
 - **рассылки обновлений присутствия в реальном времени** через **`frappe.publish_realtime`** (штатный Redis → Node Socket.IO → клиенты Desk);
 - хранения **истории событий входа и выхода** (Login / Logout) с метаданными запроса.
 
@@ -23,21 +23,21 @@
 
 | Возможность | Статус | Примечание |
 |-------------|--------|------------|
-| Обновление присутствия при **подключении / переподключении Socket.IO Desk** | Реализовано | `public/js/pulse_socket.js` вешает **`connect`** и **`reconnect`** на клиент Socket.IO → один вызов **`pulse_app.api.presence.mark_online`** (whitelist). **Периодического HTTP-heartbeat нет.** |
-| Рассылка изменений всем подключённым клиентам Desk | Реализовано | После обновления полей User — **`frappe.publish_realtime("pulse_presence", {...}, after_commit=True)`**; на клиенте — **`frappe.realtime.on("pulse_presence", ...)`** и событие jQuery **`$(document).trigger("pulse_presence", data)`**. |
-| Снимок «онлайн» по REST (`GET .../presence/online`) | Реализовано | Для первичной загрузки UI; актуальность списка дальше — через realtime. Порог **`ONLINE_WINDOW_SEC`** (по умолчанию 120 с) в `service.py`. |
+| Обновление присутствия при **подключении / переподключении Socket.IO Desk** | Реализовано | `public/js/pulse_socket.js` → **`mark_online`** при **`connect` / `reconnect`** (обновление БД). Периодического HTTP heartbeat **нет**. |
+| Рассылка изменений всем подключённым клиентам Desk | Реализовано | Python: **`frappe.publish_realtime("pulse_presence", …)`**; Node **`pulse_app/realtime/handlers.js`** публикует в тот же Redis-канал **`events`**. Клиент: **`frappe.realtime.on("pulse_presence", …)`**. |
+| Снимок «онлайн» по REST (`GET .../presence/online`) | Реализовано | Только счётчики Socket.IO в Redis (**`pulse_app:socket_ref:{site}`**). |
 | Чтение истории сессий (`GET .../session-events`) | Реализовано | Обычный пользователь — только свои записи; **System Manager** — фильтр `user` и полный журнал. |
 | Запись Login/Logout в **Pulse Session Event** | Частично | Есть **`record_session_event()`**; автоматический вызов из хуков авторизации Frappe — по желанию. |
 | Отображение DocTypes в Desk | Метаданные | Права см. раздел «Безопасность». |
-| Событие **disconnect** сокета → немедленное «офлайн» | Не реализовано | Список онлайн со временем «остывает» по **`ONLINE_WINDOW_SEC`** без записи при обрыве сокета (можно добавить позже через Node `realtime/handlers.js` или обработчик disconnect в JS). |
+| Событие **disconnect** сокета → обновление списка онлайн | Реализовано | Node уменьшает счётчик вкладок и шлёт **`pulse_presence`** (`offline`) при последнем отключении пользователя. |
 | Явный REST только для Login/Logout-событий | Не реализовано | По необходимости — отдельный whitelist или только хуки. |
 
 ### 2.2. Логика «кто онлайн»
 
-- **Источник истины в БД:** **`User.pulse_last_seen_on`** (и опционально **`User.pulse_presence_source`** для метки клиента), обновляются при успешном вызове **`mark_online`** (после событий **`connect` / `reconnect`** Socket.IO, не по таймеру).
+- Список строится **только** по hash **`pulse_app:socket_ref:{site}`** (счётчики подключений на стороне Node). Уведомления — публикация в Redis-канал **`events`** (как у **`publish_realtime`**).
+- **`User.pulse_last_seen_on`** обновляется при **`mark_online`** (после **`connect` / `reconnect`** и т.д.) и используется для отображения last seen / индикаторов, но **не** для membership в списке онлайн Pulse.
 - **Сессия Frappe:** пользователь в whitelist определяется через **`frappe.session.user`** — те же cookie / механизм, что у **`/api/method/...`** и Desk.
-- **Realtime:** обновления списка расходятся по **Socket.IO** через стек Frappe (**Redis pub/sub** → Node **realtime** → браузеры); см. [документацию Frappe Realtime](https://docs.frappe.io/framework/user/en/api/realtime).
-- **Онлайн:** пользователь учитывается в **`online_users`** и в **`GET .../presence/online`**, если **`pulse_last_seen_on`** не старше окна **`ONLINE_WINDOW_SEC`**.
+- **Realtime:** **Redis `events`** → Node **realtime** → **Socket.IO**; см. [документацию Frappe Realtime](https://docs.frappe.io/framework/user/en/api/realtime).
 
 ### 2.3. Связь с полем **User.last_login**
 
@@ -248,9 +248,9 @@ frappe.realtime.on("pulse_presence", function (data) {
 
 ## 7. WebSocket / Socket.IO
 
-- **Доставка обновлений присутствия другим пользователям** — через штатный стек Frappe: **`frappe.publish_realtime`** → Redis → процесс **Node (realtime)** → **Socket.IO** → браузеры Desk.
-- **Триггер записи в БД** — при **`connect` / `reconnect`** клиентского Socket.IO вызывается whitelist **`mark_online`** (один HTTP-запрос на событие подключения, без циклического heartbeat).
-- Опционально можно добавить **`pulse_app/realtime/handlers.js`** (расширение Socket.IO на стороне Node по [документации Frappe](https://docs.frappe.io/framework/user/en/api/realtime#custom-event-handlers)) для обработки кастомных событий без дополнительных HTTP — при необходимости интегратор подключает вызов Python самостоятельно.
+- **Доставка `pulse_presence`** — канал Redis **`events`** → процесс **Node realtime**: и **`frappe.publish_realtime`**, и **`pulse_app/realtime/handlers.js`**.
+- **Запись last seen в БД** — **`mark_online`** при **`connect` / `reconnect`** (и навигации Desk), без интервального heartbeat.
+- **`pulse_app/realtime/handlers.js`** — расширение по [документации Frappe](https://docs.frappe.io/framework/user/en/api/realtime#custom-event-handlers): учёт подключений и **`publish("events", …)`** с телом как у Python.
 
 Подключение **`record_session_event`** к **LoginManager** / **`auth_hooks`** — отдельная задача.
 

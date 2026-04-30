@@ -214,7 +214,11 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 			console.info("[pulse] pulse_online_dashboard", msg);
 		}
 		const users = msg.online_users || [];
-		const windowSec = msg.online_window_sec ?? 120;
+		const windowSecRaw = msg.online_window_sec ?? 120;
+		const windowSecDisplay =
+			windowSecRaw === 0 || windowSecRaw === "0"
+				? __("Live (socket)")
+				: String(windowSecRaw) + "s";
 		const serverTime = msg.server_time || "";
 		const me = msg.current_user || frappe.session.user;
 		const events = msg.session_events || [];
@@ -227,14 +231,10 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 
 		const listSrc = msg.online_list_source || "";
 		function onlineListSourceHint(mode) {
-			if (mode === "redis_only") {
-				return __("Who is online: Redis only (active Pulse channel keys), not DB window.");
-			}
-			if (mode === "merged") {
-				return __("Who is online: Redis keys merged with DB time window.");
-			}
-			if (mode === "db_only") {
-				return __("Who is online: DB window on User pulse_last_seen_on.");
+			if (mode === "socket") {
+				return __(
+					"Who is online: active Desk Socket.IO connections (Redis); updates via the standard realtime channel."
+				);
 			}
 			return "";
 		}
@@ -345,8 +345,7 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 			"</div>" +
 			'<div class="pulse-online-stat">' +
 			'<div class="pulse-online-stat-value">' +
-			windowSec +
-			"s" +
+			pulse_online_escape(windowSecDisplay) +
 			"</div>" +
 			'<div class="pulse-online-stat-label">' +
 			__("Presence window") +

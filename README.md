@@ -22,7 +22,7 @@ Frappe gives you great auth and Desk — but not a batteries-included **“who�
 
 Pulse adds:
 
-- **Presence** — last seen, online/away semantics (time window–based), optional **client/service tag** (`desk`, `portal`, `mobile`, …).
+- **Presence** — last seen in DB, **who’s online** from live Socket.IO counts in Redis, optional **client/service tag** (`desk`, `portal`, `mobile`, …).
 - **Realtime** — `frappe.publish_realtime` → **`pulse_presence`** events on the standard Frappe **Socket.IO** path (Redis → Node realtime → browsers).
 - **Explicit offline** — tab close / logout paths call **`mark_offline`** so others aren’t stuck waiting for a timeout.
 - **Session history plumbing** — `Pulse Session Event` (Login/Logout rows); wire your auth hooks when you’re ready.

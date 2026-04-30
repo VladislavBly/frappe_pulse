@@ -25,14 +25,14 @@ after_migrate = "pulse_app.pulse.install.after_migrate"
 on_login = "pulse_app.pulse.auth_hooks.on_login"
 on_logout = "pulse_app.pulse.auth_hooks.on_logout"
 
-# Desk bootinfo: интервал heartbeat и режим Redis-присутствия → frappe.boot.pulse
+# Desk bootinfo → frappe.boot.pulse (online_window_sec для страницы pulse-online)
 boot_session = "pulse_app.pulse.boot_session.extend_bootinfo"
 
 # Request routing (custom REST under /api/pulse/*)
 # ------------
 before_request = ["pulse_app.utils.api_routes.handle_api_routes"]
 
-# Desk: только heartbeat mark_online / realtime (без подстановок в список User — см. страницу pulse-online).
+# Desk: mark_online при connect сокета + realtime pulse_presence (см. страницу pulse-online).
 # ------------
 app_include_js = [
 	"/assets/pulse_app/js/pulse_socket.js",

@@ -22,7 +22,7 @@ class PulseUserPresenceController:
 		return json_response(service.mark_online_presence(service=svc))
 
 	def heartbeat(self) -> Response:
-		"""POST /api/pulse/presence/heartbeat — то же, что mark-online (Redis/TTL heartbeat)."""
+		"""POST /api/pulse/presence/heartbeat — то же, что mark-online (внешние клиенты)."""
 		return self.mark_online()
 
 	def mark_offline(self) -> Response:

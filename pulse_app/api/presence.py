@@ -73,7 +73,7 @@ def build_pulse_online_dashboard_payload(for_viewer: str) -> dict:
 	payload = {
 		"online_users": out,
 		"online_window_sec": pulse_service.effective_online_window_sec(),
-		"online_list_source": pulse_service.online_snapshot_mode(),
+		"online_list_source": pulse_service.ONLINE_LIST_SOURCE,
 		"server_time": now_datetime().isoformat(),
 		"current_user": for_viewer,
 		"session_events": _session_events_for_viewer(for_viewer, 80),
@@ -117,7 +117,7 @@ def mark_online(service=None):
 
 @frappe.whitelist()
 def heartbeat(service=None):
-	"""Синоним ``mark_online`` для клиентского heartbeat по вашей схеме Redis/TTL."""
+	"""Синоним ``mark_online`` для внешних клиентов (периодический ping при необходимости)."""
 	return mark_online(service=service)
 
 
