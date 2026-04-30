@@ -1,6 +1,7 @@
 """Присутствие через realtime (publish_realtime), список онлайн, журнал сессий.
 
-Источник истины для «кто онлайн» — поля User (pulse_last_seen_on, pulse_presence_source).
+«Кто онлайн»: при включённом Redis ключи с TTL дополняются снимком из User.pulse_last_seen_on,
+чтобы список не был пустым, если SETEX/scan недоступны.
 """
 
 from __future__ import annotations
@@ -15,10 +16,85 @@ EVENT_DOCTYPE = "Pulse Session Event"
 
 ONLINE_WINDOW_SEC = 120
 SERVICE_MAX_LEN = 120
-
 REALTIME_EVENT = "pulse_presence"
-
 _SERVICE_SAFE = re.compile(r"^[a-zA-Z0-9._:\-/]+$")
+
+
+def _db_online_window_sec() -> int:
+	"""Окно для выборки онлайн из БД (без Redis или как дополнение к Redis)."""
+	try:
+		return int(frappe.conf.get("pulse_online_window_sec") or ONLINE_WINDOW_SEC)
+	except Exception:
+		return ONLINE_WINDOW_SEC
+
+
+def _merge_online_rows(a: list[dict], b: list[dict]) -> list[dict]:
+	"""Объединить два снимка по user, оставить более поздний last_seen_on."""
+	epoch = datetime(1970, 1, 1)
+	by_user: dict[str, dict] = {}
+
+	def seen_dt(row: dict) -> datetime:
+		ls = row.get("last_seen_on")
+		if ls is None:
+			return epoch
+		try:
+			return get_datetime(ls)
+		except Exception:
+			return epoch
+
+	for row in a + b:
+		u = row.get("user")
+		if not u:
+			continue
+		prev = by_user.get(u)
+		if prev is None or seen_dt(row) >= seen_dt(prev):
+			by_user[u] = row
+	out = list(by_user.values())
+	out.sort(key=seen_dt, reverse=True)
+	return out
+
+
+def diagnostics_presence() -> dict:
+	"""Сводка для отладки пустого списка онлайн / журнала (см. pulse_presence_debug)."""
+	cols = _user_presence_columns()
+	has_ls = "pulse_last_seen_on" in cols
+	has_src = "pulse_presence_source" in cols
+	db_rows = _online_users_snapshot_db()
+	dt_exists = bool(frappe.db.exists("DocType", EVENT_DOCTYPE))
+	redis_on = False
+	redis_ttl = None
+	redis_names_len = 0
+	redis_snap_len = 0
+	redis_err = None
+	try:
+		from pulse_app.pulse.modules.user_presence import redis_presence
+
+		redis_on = redis_presence.redis_presence_enabled()
+		if redis_on:
+			redis_ttl = redis_presence.ttl_seconds()
+			redis_names_len = len(redis_presence.iter_online_usernames())
+			redis_snap_len = len(_online_users_snapshot_redis())
+	except Exception:
+		redis_err = frappe.get_traceback()[-1200:]
+	try:
+		merged_len = len(_online_users_snapshot())
+	except Exception:
+		merged_len = -1
+		redis_err = (redis_err or "") + "\n" + frappe.get_traceback()[-600:]
+	return {
+		"has_pulse_last_seen_on": has_ls,
+		"has_pulse_presence_source": has_src,
+		"pulse_session_event_doctype": dt_exists,
+		"session_events_total": frappe.db.count(EVENT_DOCTYPE) if dt_exists else None,
+		"db_online_count": len(db_rows),
+		"db_window_sec": _db_online_window_sec(),
+		"redis_presence_enabled": redis_on,
+		"redis_ttl_sec": redis_ttl,
+		"redis_usernames_count": redis_names_len,
+		"redis_snapshot_user_rows": redis_snap_len,
+		"merged_online_count": merged_len,
+		"redis_diag_error": redis_err,
+	}
 
 
 def _publish_presence_event(payload: dict) -> None:
@@ -142,7 +218,7 @@ def effective_online_window_sec() -> int:
 			return redis_presence.ttl_seconds()
 	except Exception:
 		pass
-	return ONLINE_WINDOW_SEC
+	return _db_online_window_sec()
 
 
 def mark_offline_presence() -> dict:
@@ -162,7 +238,7 @@ def _online_users_snapshot_db() -> list[dict]:
 	if "pulse_last_seen_on" not in _user_presence_columns():
 		return []
 
-	cutoff = now_datetime() - timedelta(seconds=ONLINE_WINDOW_SEC)
+	cutoff = now_datetime() - timedelta(seconds=_db_online_window_sec())
 	fields = ["name", "pulse_last_seen_on"]
 	if "pulse_presence_source" in _user_presence_columns():
 		fields.append("pulse_presence_source")
@@ -218,14 +294,21 @@ def _online_users_snapshot_redis() -> list[dict]:
 
 
 def _online_users_snapshot() -> list[dict]:
+	db_rows = _online_users_snapshot_db()
 	try:
 		from pulse_app.pulse.modules.user_presence import redis_presence
 
-		if redis_presence.redis_presence_enabled():
-			return _online_users_snapshot_redis()
+		if not redis_presence.redis_presence_enabled():
+			return db_rows
+		try:
+			redis_rows = _online_users_snapshot_redis()
+		except Exception:
+			frappe.log_error(title="Pulse: Redis snapshot failed (using DB only)", message=frappe.get_traceback())
+			redis_rows = []
+		return _merge_online_rows(redis_rows, db_rows)
 	except Exception:
 		frappe.log_error(title="Pulse: Redis snapshot fallback", message=frappe.get_traceback())
-	return _online_users_snapshot_db()
+		return db_rows
 
 
 def mark_online_presence(*, service: str | None = None) -> dict:
@@ -237,6 +320,12 @@ def mark_online_presence(*, service: str | None = None) -> dict:
 	user = _require_logged_in()
 	norm = normalize_presence_service(service)
 	row = _touch_presence_last_seen(user, service=norm)
+	if frappe.conf.get("pulse_presence_debug"):
+		frappe.logger("pulse_presence", allow_site=True).info(
+			"pulse mark_online user=%s service=%s",
+			user,
+			norm or "",
+		)
 	_publish_presence_event(
 		{
 			"kind": "presence_update",

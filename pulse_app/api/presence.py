@@ -149,7 +149,7 @@ def pulse_online_dashboard():
 			}
 		)
 
-	return {
+	payload = {
 		"online_users": out,
 		"online_window_sec": pulse_service.effective_online_window_sec(),
 		"server_time": now_datetime().isoformat(),
@@ -159,3 +159,6 @@ def pulse_online_dashboard():
 		if ("System Manager" in frappe.get_roles(frappe.session.user))
 		else "mine",
 	}
+	if frappe.conf.get("pulse_presence_debug") or frappe.conf.get("developer_mode"):
+		payload["_pulse_debug"] = pulse_service.diagnostics_presence()
+	return payload

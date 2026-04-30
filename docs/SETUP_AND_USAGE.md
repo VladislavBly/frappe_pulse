@@ -198,8 +198,10 @@ curl -sS "$SITE/api/pulse/session-events?limit_page_length=20" -b cookies.txt
 | Нет realtime-обновлений | **Redis**, процесс **Node realtime**, firewall до порта Socket.IO. |
 | Ошибка при **mark-online** | Авторизация (cookie/token), **CSRF** для POST, корректное имя сайта в URL. |
 | Поля Pulse не видны в форме User | **`bench migrate`**, **Customize Form** для User — Custom Fields **Pulse last seen** / **Pulse presence source**. |
+| Страница «Pulse — онлайн» пустая при включённом Redis | Раньше список брался только из Redis; после обновления приложения список объединяется с БД. Проверьте **`has_pulse_last_seen_on`** в отладке и выполните **`migrate`**. |
+| Нужны логи в браузере без правки сервера | В консоли: `localStorage.setItem("pulse_presence_debug","1")`, обновить страницу — в консоли появятся **`[pulse] pulse_online_dashboard`** и **`pulse_presence`**. |
 
-Отладка API: в `site_config.json` можно временно включить **`pulse_api_debug`** (см. [ARCHITECTURE.md](ARCHITECTURE.md)).
+Отладка API: в `site_config.json` можно временно включить **`pulse_api_debug`** (см. [ARCHITECTURE.md](ARCHITECTURE.md)). Для диагностики присутствия добавьте **`pulse_presence_debug`: 1** или включите **`developer_mode`** — в ответе **`pulse_online_dashboard`** появится **`_pulse_debug`**, на странице — жёлтый блок с JSON (после **`bench restart`** / **`clear-cache`**).
 
 ---
 

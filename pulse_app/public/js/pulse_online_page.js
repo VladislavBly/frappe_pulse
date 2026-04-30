@@ -124,6 +124,15 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 	function bindRealtime() {
 		prevHandlerCleanup();
 		function onPresence(data) {
+			if (
+				window.console &&
+				console.info &&
+				((frappe.boot && frappe.boot.developer_mode) ||
+					(typeof localStorage !== "undefined" &&
+						localStorage.getItem("pulse_presence_debug") === "1"))
+			) {
+				console.info("[pulse] pulse_presence event", data);
+			}
 			appendLiveFeedEntry(data || {});
 			if (debouncedPresenceLoad) {
 				debouncedPresenceLoad();
@@ -192,6 +201,15 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 
 	function render(msg, flash) {
 		msg = msg || {};
+		if (
+			window.console &&
+			console.info &&
+			((frappe.boot && frappe.boot.developer_mode) ||
+				(typeof localStorage !== "undefined" &&
+					localStorage.getItem("pulse_presence_debug") === "1"))
+		) {
+			console.info("[pulse] pulse_online_dashboard", msg);
+		}
 		const users = msg.online_users || [];
 		const windowSec = msg.online_window_sec ?? 120;
 		const serverTime = msg.server_time || "";
@@ -265,6 +283,17 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 
 		const html =
 			'<div class="pulse-online-wrap">' +
+			(msg._pulse_debug
+				? '<div class="alert alert-warning pulse-online-debug-banner mb-2"><strong>Pulse debug</strong> ' +
+				  pulse_online_escape(
+						__(
+							'Disable: remove pulse_presence_debug from site_config. Console: localStorage.removeItem("pulse_presence_debug")'
+						)
+				  ) +
+				  '<pre class="pulse-online-debug-pre">' +
+				  pulse_online_escape(JSON.stringify(msg._pulse_debug, null, 2)) +
+				  "</pre></div>"
+				: "") +
 			'<div class="pulse-online-toolbar">' +
 			'<div class="pulse-online-live">' +
 			'<span class="pulse-online-live-dot" aria-hidden="true"></span>' +
