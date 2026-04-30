@@ -20,6 +20,19 @@ REALTIME_EVENT = "pulse_presence"
 _SERVICE_SAFE = re.compile(r"^[a-zA-Z0-9._:\-/]+$")
 
 
+def _publish_admin_dashboard_snapshots_lazy() -> None:
+	"""Полный JSON страницы Pulse — онлайн через Socket.IO (только viewer с ролями)."""
+	try:
+		from pulse_app.api.presence import publish_pulse_online_dashboard_snapshots
+
+		publish_pulse_online_dashboard_snapshots()
+	except Exception:
+		frappe.log_error(
+			title="Pulse: publish_pulse_online_dashboard_snapshots",
+			message=frappe.get_traceback(),
+		)
+
+
 def _db_online_window_sec() -> int:
 	"""Окно для выборки онлайн из БД (без Redis или как дополнение к Redis)."""
 	try:
@@ -228,9 +241,9 @@ def mark_offline_presence() -> dict:
 		{
 			"kind": "offline",
 			"user": user,
-			"online_users": _online_users_snapshot(),
 		}
 	)
+	_publish_admin_dashboard_snapshots_lazy()
 	return {"offline": True, "user": user}
 
 
@@ -332,14 +345,23 @@ def mark_online_presence(*, service: str | None = None) -> dict:
 			"user": user,
 			"last_seen_on": row.get("last_seen_on"),
 			"service": row.get("service"),
-			"online_users": _online_users_snapshot(),
 		}
 	)
+	_publish_admin_dashboard_snapshots_lazy()
 	return {"profile": row, "updated_at": now_datetime()}
 
 
+def get_online_users_snapshot_internal() -> list[dict]:
+	"""Снимок «кто онлайн» без проверки сессии (рассылка админам по сокету)."""
+	return _online_users_snapshot()
+
+
 def list_online_users() -> list[dict]:
-	_require_logged_in()
+	user = _require_logged_in()
+	from pulse_app.pulse.dashboard_access import user_can_view_pulse_online_dashboard
+
+	if not user_can_view_pulse_online_dashboard(user):
+		frappe.throw(frappe._("Not permitted"), frappe.PermissionError)
 	return _online_users_snapshot()
 
 

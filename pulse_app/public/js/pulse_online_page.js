@@ -122,6 +122,19 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 		frappe.pages["pulse-online"]._pulseRtHandler = null;
 	}
 
+	function prevSnapshotCleanup() {
+		const prev = frappe.pages["pulse-online"]._pulseSnapshotHandler;
+		if (!prev) {
+			return;
+		}
+		try {
+			frappe.realtime.off("pulse_online_snapshot", prev);
+		} catch (e) {
+			/* ignore */
+		}
+		frappe.pages["pulse-online"]._pulseSnapshotHandler = null;
+	}
+
 	function bindRealtime() {
 		prevHandlerCleanup();
 		function onPresence(data) {
@@ -143,6 +156,30 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 		}
 		frappe.pages["pulse-online"]._pulseRtHandler = onPresence;
 		frappe.realtime.on("pulse_presence", onPresence);
+	}
+
+	/** Полный JSON страницы (только пользователи с ролями дашборда); см. pulse_online_dashboard на сервере. */
+	function bindSnapshotRealtime() {
+		prevSnapshotCleanup();
+		function onSnapshot(msg) {
+			if (!msg || typeof msg !== "object") {
+				return;
+			}
+			if (
+				window.console &&
+				console.info &&
+				((frappe.boot && frappe.boot.developer_mode) ||
+					(typeof localStorage !== "undefined" &&
+						localStorage.getItem("pulse_presence_debug") === "1"))
+			) {
+				console.info("[pulse] pulse_online_snapshot", msg);
+			}
+			lastRefreshAt = new Date();
+			render(msg, true);
+			updateLiveStrip();
+		}
+		frappe.pages["pulse-online"]._pulseSnapshotHandler = onSnapshot;
+		frappe.realtime.on("pulse_online_snapshot", onSnapshot);
 	}
 
 	function flashToolbar() {
@@ -508,6 +545,7 @@ frappe.pages["pulse-online"].on_page_load = function (wrapper) {
 	page.add_inner_button(__("Clear live feed"), clearLiveFeed);
 
 	bindRealtime();
+	bindSnapshotRealtime();
 
 	if (frappe.pages["pulse-online"]._pollTimer) {
 		clearInterval(frappe.pages["pulse-online"]._pollTimer);
@@ -554,5 +592,14 @@ frappe.pages["pulse-online"].on_page_hide = function () {
 			/* ignore */
 		}
 		frappe.pages["pulse-online"]._pulseRtHandler = null;
+	}
+	const sh = frappe.pages["pulse-online"]._pulseSnapshotHandler;
+	if (sh) {
+		try {
+			frappe.realtime.off("pulse_online_snapshot", sh);
+		} catch (e) {
+			/* ignore */
+		}
+		frappe.pages["pulse-online"]._pulseSnapshotHandler = null;
 	}
 };

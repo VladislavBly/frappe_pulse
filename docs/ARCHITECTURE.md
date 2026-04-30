@@ -195,12 +195,12 @@ sequenceDiagram
 
 ```javascript
 frappe.realtime.on("pulse_presence", function (data) {
-  // data.kind, data.user, data.online_users, …
+  // data.kind, data.user, data.service, data.last_seen_on
   $(document).trigger("pulse_presence", data);
 });
 ```
 
-Полезная нагрузка (формируется в **`service.mark_online_presence`**): как минимум **`kind`**, **`user`**, **`last_seen_on`**, **`online_users`** (массив актуальных «онлайн» из БД на момент публикации).
+Полезная нагрузка **`pulse_presence`** (из **`service.mark_online_presence`**): **`kind`**, **`user`**, **`last_seen_on`**, **`service`**. Полный список онлайн рассылается отдельным событием **`pulse_online_snapshot`** только пользователям с ролями дашборда (`pulse_online_dashboard_roles`).
 
 ### 5.3. REST: базовый префикс **`/api/pulse`**
 

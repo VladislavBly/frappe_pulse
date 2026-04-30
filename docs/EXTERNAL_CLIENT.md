@@ -48,28 +48,27 @@ curl -sS -X POST 'https://YOUR_SITE/api/pulse/presence/mark-online' \
 
 Имя события: **`pulse_presence`**.
 
-Типичные полезные нагрузки:
+Типичная полезная нагрузка **`pulse_presence`** (без полного списка онлайн — чтобы не светить его всем подписчикам Desk):
 
 ```json
 {
   "kind": "presence_update",
   "user": "user@example.com",
   "last_seen_on": "...",
-  "service": "portal-spa",
-  "online_users": [
-    { "user": "a@x.com", "last_seen_on": "...", "service": "desk" },
-    { "user": "b@x.com", "last_seen_on": "...", "service": "mobile-ios" }
-  ]
+  "service": "portal-spa"
 }
 ```
 
 ```json
 {
   "kind": "offline",
-  "user": "user@example.com",
-  "online_users": [ ... ]
+  "user": "user@example.com"
 }
 ```
+
+Полный снимок страницы «Pulse — онлайн» (список онлайн, журнал сессий и т.д.) сервер шлёт отдельным событием **`pulse_online_snapshot`** только в комнаты пользователей с ролями из **`pulse_online_dashboard_roles`** (по умолчанию **System Manager**). Подключение к Socket.IO как у Desk; без этих ролей событие не приходит.
+
+Для произвольного клиента со списком онлайн по-прежнему можно вызывать **REST** `GET /api/pulse/presence/online`, если у сессии есть доступ (те же роли), либо whitelist-метод **`pulse_online_dashboard`**.
 
 Подписчики Desk уже слушают в **`pulse_socket.js`**. Внешнему SPA нужно подключиться к **тому же Socket.IO-серверу**, что и сайт (с учётом multitenancy: **namespace `/<sitename>`** в актуальных версиях Frappe).
 
@@ -83,7 +82,12 @@ const socket = io(`${window.location.origin}/${frappe?.boot?.sitename ?? "sitena
 });
 
 socket.on("pulse_presence", (payload) => {
-  console.log(payload.kind, payload.user, payload.service, payload.online_users);
+  console.log(payload.kind, payload.user, payload.service);
+});
+
+socket.on("pulse_online_snapshot", (payload) => {
+  /* только для пользователей с ролями дашборда */
+  console.log(payload.online_users, payload.session_events);
 });
 ```
 

@@ -7,11 +7,8 @@ from werkzeug.wrappers import Response
 
 from pulse_app.bin.serializers.http_response import json_response, json_response_list
 from pulse_app.http.request_helpers import parse_json_body, query_int
+from pulse_app.pulse.dashboard_access import user_can_view_pulse_online_dashboard
 from pulse_app.pulse.modules.user_presence import service
-
-
-def _is_system_manager(session_user: str) -> bool:
-	return "System Manager" in frappe.get_roles(session_user)
 
 
 class PulseUserPresenceController:
@@ -46,12 +43,12 @@ class PulseUserPresenceController:
 		params = frappe.local.request.args or {}
 		filter_user = (params.get("user") or "").strip() or None
 		if filter_user and filter_user != user:
-			if not _is_system_manager(user):
+			if not user_can_view_pulse_online_dashboard(user):
 				frappe.throw(frappe._("Not permitted"), frappe.PermissionError)
 
 		limit_start = query_int(params.get("limit_start"), default=0)
 		limit_page_length = query_int(params.get("limit_page_length"), default=50)
-		if filter_user is None and not _is_system_manager(user):
+		if filter_user is None and not user_can_view_pulse_online_dashboard(user):
 			filter_user = user
 
 		rows, total = service.list_session_events(

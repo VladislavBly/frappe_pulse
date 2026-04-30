@@ -7,6 +7,7 @@ import os
 import frappe
 from frappe.utils import get_datetime
 
+from pulse_app.pulse.dashboard_access import get_pulse_online_dashboard_roles
 from pulse_app.pulse.setup.workspace_sidebar import (
 	ensure_sidebar,
 	sync_pulse_workspace_shortcuts_from_app,
@@ -77,6 +78,7 @@ def _ensure_user_cf_pulse_presence_source():
 def after_install():
 	ensure_pulse_user_custom_fields()
 	ensure_pulse_online_page()
+	sync_pulse_online_page_roles()
 	sync_pulse_workspace_shortcuts_from_app()
 	ensure_sidebar()
 
@@ -84,6 +86,7 @@ def after_install():
 def after_migrate():
 	ensure_pulse_user_custom_fields()
 	ensure_pulse_online_page()
+	sync_pulse_online_page_roles()
 	_ensure_pulse_user_field_in_list_view()
 	_hide_pulse_columns_from_user_list()
 	_sync_legacy_pulse_profile_into_user()
@@ -102,6 +105,26 @@ def _ensure_pulse_online_page_directory():
 		os.makedirs(dir_path, exist_ok=True)
 	except Exception:
 		frappe.log_error(title="Pulse: ensure page directory pulse/page/pulse_online", message=frappe.get_traceback())
+
+
+def sync_pulse_online_page_roles():
+	"""Страница pulse-online только для ролей из pulse_online_dashboard_roles (по умолчанию System Manager)."""
+	if not frappe.db.exists("Page", "pulse-online"):
+		return
+	try:
+		roles = get_pulse_online_dashboard_roles()
+		page = frappe.get_doc("Page", "pulse-online")
+		want = set(roles)
+		have = {r.role for r in (page.roles or [])}
+		if want == have:
+			return
+		page.roles = []
+		for role in roles:
+			page.append("roles", {"role": role})
+		page.save(ignore_permissions=True)
+		frappe.clear_cache(doctype="Page")
+	except Exception:
+		frappe.log_error(title="Pulse: sync_pulse_online_page_roles", message=frappe.get_traceback())
 
 
 def ensure_pulse_online_page():
@@ -128,7 +151,8 @@ def ensure_pulse_online_page():
 				"standard": "No",
 			}
 		)
-		doc.append("roles", {"role": "Desk User"})
+		for role in get_pulse_online_dashboard_roles():
+			doc.append("roles", {"role": role})
 		# Page.validate требует developer_mode для новых записей — из migrate это блокировало insert.
 		doc.flags.ignore_validate = True
 		# JS из hooks page_js; не создавать файлы в модуле при insert/on_update.

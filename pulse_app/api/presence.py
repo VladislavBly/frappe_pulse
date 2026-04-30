@@ -6,23 +6,29 @@ import json
 
 import frappe
 
+from pulse_app.pulse.dashboard_access import (
+	iter_pulse_online_dashboard_viewers,
+	user_can_view_pulse_online_dashboard,
+	viewer_sees_all_pulse_session_events,
+)
 from pulse_app.pulse.modules.user_presence import service as pulse_service
 
+REALTIME_SNAPSHOT_EVENT = "pulse_online_snapshot"
 
-def _session_events_for_pulse_page(limit: int = 40) -> list[dict]:
-	"""Login/Logout из Pulse Session Event; не‑админы видят только свои строки."""
+
+def _session_events_for_viewer(viewer: str, limit: int = 40) -> list[dict]:
+	"""Login/Logout из Pulse Session Event для указанного пользователя (серверная проверка ролей)."""
 	from frappe.utils import cint, get_datetime
 
-	user = frappe.session.user
-	if not user or user == "Guest":
+	if not viewer or viewer == "Guest":
 		return []
 
 	limit = min(max(cint(limit) or 40, 1), 100)
 	if not frappe.db.exists("DocType", "Pulse Session Event"):
 		return []
 
-	is_mgr = "System Manager" in frappe.get_roles(user)
-	filters = None if is_mgr else {"user": user}
+	sees_all = viewer_sees_all_pulse_session_events(viewer)
+	filters = None if sees_all else {"user": viewer}
 
 	rows = frappe.get_all(
 		"Pulse Session Event",
@@ -45,6 +51,46 @@ def _session_events_for_pulse_page(limit: int = 40) -> list[dict]:
 			}
 		)
 	return out
+
+
+def _session_events_for_pulse_page(limit: int = 40) -> list[dict]:
+	return _session_events_for_viewer(frappe.session.user, limit)
+
+
+def build_pulse_online_dashboard_payload(for_viewer: str) -> dict:
+	"""Тот же JSON, что у whitelist pulse_online_dashboard (без проверки текущей сессии)."""
+	from frappe.utils import now_datetime
+
+	rows = pulse_service.get_online_users_snapshot_internal()
+	out = []
+	for row in rows:
+		ls = row.get("last_seen_on")
+		out.append(
+			{
+				"user": row.get("user"),
+				"last_seen_on": ls.isoformat() if hasattr(ls, "isoformat") else ls,
+				"service": row.get("service"),
+			}
+		)
+
+	payload = {
+		"online_users": out,
+		"online_window_sec": pulse_service.effective_online_window_sec(),
+		"server_time": now_datetime().isoformat(),
+		"current_user": for_viewer,
+		"session_events": _session_events_for_viewer(for_viewer, 80),
+		"session_events_scope": "all" if viewer_sees_all_pulse_session_events(for_viewer) else "mine",
+	}
+	if frappe.conf.get("pulse_presence_debug") or frappe.conf.get("developer_mode"):
+		payload["_pulse_debug"] = pulse_service.diagnostics_presence()
+	return payload
+
+
+def publish_pulse_online_dashboard_snapshots() -> None:
+	"""Полный снимок страницы Pulse — онлайн только подключённым viewer с нужными ролями (после commit)."""
+	for viewer in iter_pulse_online_dashboard_viewers():
+		payload = build_pulse_online_dashboard_payload(viewer)
+		frappe.publish_realtime(REALTIME_SNAPSHOT_EVENT, payload, user=viewer, after_commit=True)
 
 
 def _extract_service_from_request():
@@ -131,34 +177,14 @@ def desk_pulse_snapshot(users=None):
 def pulse_online_dashboard():
 	"""
 	Страница «Pulse — онлайн»: список пользователей в окне онлайна + метаданные для UI.
+
+	Доступ только пользователям с ролями из ``pulse_online_dashboard_roles``
+	(по умолчанию **System Manager**). Полный снимок также шлётся в Socket.IO как
+	``pulse_online_snapshot`` (только в комнаты этих пользователей).
 	"""
 	if frappe.session.user == "Guest":
 		frappe.throw(frappe._("Not permitted"), frappe.PermissionError)
+	if not user_can_view_pulse_online_dashboard(frappe.session.user):
+		frappe.throw(frappe._("Not permitted"), frappe.PermissionError)
 
-	from frappe.utils import now_datetime
-
-	rows = pulse_service.list_online_users()
-	out = []
-	for row in rows:
-		ls = row.get("last_seen_on")
-		out.append(
-			{
-				"user": row.get("user"),
-				"last_seen_on": ls.isoformat() if hasattr(ls, "isoformat") else ls,
-				"service": row.get("service"),
-			}
-		)
-
-	payload = {
-		"online_users": out,
-		"online_window_sec": pulse_service.effective_online_window_sec(),
-		"server_time": now_datetime().isoformat(),
-		"current_user": frappe.session.user,
-		"session_events": _session_events_for_pulse_page(80),
-		"session_events_scope": "all"
-		if ("System Manager" in frappe.get_roles(frappe.session.user))
-		else "mine",
-	}
-	if frappe.conf.get("pulse_presence_debug") or frappe.conf.get("developer_mode"):
-		payload["_pulse_debug"] = pulse_service.diagnostics_presence()
-	return payload
+	return build_pulse_online_dashboard_payload(frappe.session.user)
