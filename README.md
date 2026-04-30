@@ -1,20 +1,19 @@
 # Pulse (`pulse_app`)
 
-Минимальное [Frappe](https://frappeframework.com/)‑приложение: **воркспейс Pulse** в Desk и **каркас каталогов** под будущий код (роутер, HTTP, модули, realtime, страницы).
+Frappe-приложение в том же стиле, что **`edoc_app`** (`edoc_frappe_app/edoc_app`): **Workspace Pulse** в Desk и **HTTP API** через архитектурный слой **`Router`** на **Werkzeug `Map`/`Rule`** (singleton **`router`**).
 
-## Структура
+## Структура (как в edoc_app)
 
-- `pulse_app/pulse/workspace/pulse/pulse.json` — описание Workspace
-- `pulse_app/pulse/setup/workspace_sidebar.py` — синхронизация сайдбара и плитки приложения при install/migrate
-- `pulse_app/core/router/` — место под HTTP‑роутинг приложения
-- `pulse_app/http/routes/` — регистрация маршрутов (заготовка `bind` в `__init__.py`)
-- `pulse_app/pulse/modules/` — фиче‑модули `pulse_app.pulse.modules.<name>`
-- `pulse_app/pulse/page/` — стандартные Desk Page (пусто)
-- `pulse_app/realtime/` — обработчики Socket.IO (пусто)
-- `pulse_app/utils/` — утилиты
-- `pulse_app/bin/serializers/` — сериализаторы ответов (пусто)
+- `pulse_app/core/router/` — класс `Router`, экземпляр `router`, `dispatch`, `route(...)`
+- `pulse_app/http/routes/` — регистрация путей через `@router.route(...)` + `bind(Controller, "method")`
+- `pulse_app/http/request_helpers.py` — разбор JSON/query (как в edoc)
+- `pulse_app/bin/serializers/http_response.py` — `json_response` / `json_error`
+- `pulse_app/utils/api_routes.py` — импорт модулей маршрутов, `router.build()`, хук `before_request` → `/api/pulse/*`
+- `pulse_app/pulse/modules/<name>/` — `service.py` + `controller.py`
+- `pulse_app/pulse/workspace/pulse/pulse.json` — Workspace
+- `pulse_app/pulse/setup/workspace_sidebar.py` — сайдбар и плитка приложения
 
-Целевая платформа и realtime‑слой описаны в [`docs/platform-architecture.md`](docs/platform-architecture.md).
+Целевая платформа (Frappe + отдельный WS-слой и т.д.) — [`docs/platform-architecture.md`](docs/platform-architecture.md).
 
 ## Установка
 
@@ -24,6 +23,12 @@ bench --site yours install-app pulse_app
 bench --site yours migrate
 bench build --app pulse_app
 ```
+
+## Проверка API
+
+С сессией Desk (cookie):
+
+`GET /api/pulse/health` → `{"data":{"status":"ok","app":"pulse_app"}}`
 
 ## Лицензия
 

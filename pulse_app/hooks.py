@@ -1,7 +1,7 @@
 app_name = "pulse_app"
 app_title = "Pulse"
 app_publisher = "Pulse"
-app_description = "Pulse Frappe app — Desk workspace shell and folder layout."
+app_description = "Pulse Frappe app — Desk workspace + HTTP router under /api/pulse/*."
 app_email = "pulse@example.com"
 app_license = "mit"
 
@@ -16,3 +16,5 @@ add_to_apps_screen = [
 
 after_install = "pulse_app.pulse.install.after_install"
 after_migrate = "pulse_app.pulse.install.after_migrate"
+
+before_request = ["pulse_app.utils.api_routes.handle_api_routes"]

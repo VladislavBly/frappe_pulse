@@ -1,1 +1,3 @@
-"""Router namespace for pulse_app (implement endpoints here later)."""
+from pulse_app.core.router.router import Router, router
+
+__all__ = ["Router", "router"]
