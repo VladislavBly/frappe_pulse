@@ -1,6 +1,8 @@
 # presence-ws
 
-На одном порту: **HTTP** (`/health`, **`/metrics`**, **`/summary`**, **`/services`**, **`/list`**, **`/online`**, **`/admin/*`**, **`/kick`**, …) и **WebSocket** на корне. Сервер — **uWebSockets.js** (npm `uwebsockets`). Образ Docker — **Debian bookworm-slim** (нативный аддон рассчитан на glibc, не Alpine)., если **не** включена проверка через Frappe (см. **`FRAPPE_PRESENCE_VERIFY_*`** и флаг **`FRAPPE_PRESENCE_VERIFY_ENABLED`** ниже): его нужно передать **в query при установлении WebSocket** — в том же URL, куда клиент делает запрос **HTTP Upgrade** (`GET` с заголовком `Upgrade: websocket`). Параметры **`?user_id=...`** или **`?sub=...`** (до 512 символов). Опционально метка источника клиента: **`?client_service=...`**, или коротко **`?svc=...`**, **`?from=...`**, **`?service=...`** (до 64 символов) — попадает в события **`welcome`** / **`join`** / **`leave`** как **`client_service`**, в **`GET /online`** → **`clients`**, компактная сводка по меткам — **`GET /summary`** / **`GET /online/summary`**, расширенная — **`GET /services`** / **`GET /online/services`** (в **`info`** → **`clients`**). Если ни одного не передали или строка пустая, сервер **не выполняет апгрейд**: ответ **HTTP 403**, до протокола WebSocket дело не доходит (ни **`welcome`**, ни событий сокета).
+На одном порту: **HTTP** и **WebSocket**. Все публичные GET завязаны на **один сегмент пути** (как **`/health`** → за прокси **`/_presence/health`**): **`/health`**, **`/metrics`**, **`/summary`**, **`/services`**, **`/list`**, **`/online`** (тот же ответ, что **`/list`** — список сессий и фильтры в query), плюс админские **`POST /kick`**, **`/kick-all`**, **`/admin/*`**. Путей вида **`/online/summary`** нет — такой URL часто ломается в nginx; используй **`/summary`**. Сервер — **uWebSockets.js** (npm `uwebsockets`). Образ Docker — **Debian bookworm-slim**.
+
+**Идентификатор пользователя (opaque) обязателен**, если **не** включена проверка через Frappe (см. **`FRAPPE_PRESENCE_VERIFY_*`** и флаг **`FRAPPE_PRESENCE_VERIFY_ENABLED`** ниже): его нужно передать **в query при установлении WebSocket** — в том же URL, куда клиент делает запрос **HTTP Upgrade** (`GET` с заголовком `Upgrade: websocket`). Параметры **`?user_id=...`** или **`?sub=...`** (до 512 символов). Опционально метка источника клиента: **`?client_service=...`**, или коротко **`?svc=...`**, **`?from=...`**, **`?service=...`** (до 64 символов) — попадает в события **`welcome`** / **`join`** / **`leave`** как **`client_service`**, список сессий по HTTP — **`GET /list`** или **`GET /online`** с теми же query-фильтрами; сводки — **`GET /summary`**, **`GET /services`**. Если ни одного не передали или строка пустая, сервер **не выполняет апгрейд**: ответ **HTTP 403**, до протокола WebSocket дело не доходит (ни **`welcome`**, ни событий сокета).
 
 Несколько сокетов с **одинаковым** `user_id` считаются **одним** пользователем: в ответах **`unique_users`**, в Redis — SET `uniq` + refcount.
 
@@ -164,9 +166,9 @@ curl -sS -X POST "http://127.0.0.1:8765/admin/kick" \
 ### Быстрый онлайн по HTTP (документация / мониторинг)
 
 - **`GET /health`** — `connections` (все сокеты), **`unique_users`**, `connections_local`, `redis`, …
-- **`GET /summary`** и **`GET /online/summary`** (одинаковый JSON) — компактно: **`total`** (`connections`, `unique_users` по всем), **`breakdown`** — массив `{ client_service, connections, unique_users }` по каждой метке (`client_service: null` — без метки), **`by_service`** — то же по ключам; без метки в **`by_service`** ключ **`_untagged`**. За nginx предпочтительно **`/_presence/summary`**, если ответ на **`/_presence/online/summary`** пустой (см. ниже).
-- **`GET /services`** и **`GET /online/services`** (одинаковый JSON) — **`services`**, **`service_stats`**, глобальные **`connections`** / **`unique_users`**, без **`clients`**. За nginx при пустом ответе используй **`/_presence/services`**.
-- **`GET /online`** — массив **`clients`** и счётчики (или при фильтре — только выбранная метка). То же, что **`GET /list`** (короткий путь без сегмента **`online`**). Фильтры: **`?client_service=`**, **`?svc=`**, **`?client_service=__none__`**; при фильтре в теле **`filter`**.
+- **`GET /summary`** — компактно: **`total`** (`connections`, `unique_users` по всем), **`breakdown`** — массив `{ client_service, connections, unique_users }` по каждой метке (`client_service: null` — без метки), **`by_service`** — то же по ключам; без метки в **`by_service`** ключ **`_untagged`**. За nginx: **`/_presence/summary`** (один сегмент после префикса, как для **`/health`**).
+- **`GET /services`** — **`services`**, **`service_stats`**, глобальные **`connections`** / **`unique_users`**, без **`clients`**. За nginx: **`/_presence/services`**.
+- **`GET /list`** и **`GET /online`** — один обработчик: массив **`clients`** и счётчики (или при фильтре — только выбранная метка). Фильтры: **`?client_service=`**, **`?svc=`**, **`?client_service=__none__`**; при фильтре в теле **`filter`**. За nginx: **`/_presence/list`** или **`/_presence/online`**.
 - **`GET /metrics`** — текст Prometheus (**`metrics_path`** для scrape обычно **`/metrics`**; алиас не нужен).
 - **`POST /admin/kick`**, **`POST /admin/kick-all`** — отключить сессию / все (заголовок **`X-Admin-Token`** или Bearer, см. **`ADMIN_TOKEN`**). Короткие пути: **`POST /kick`**, **`POST /kick-all`** (то же поведение).
 
@@ -176,8 +178,8 @@ curl -sS -X POST "http://127.0.0.1:8765/admin/kick" \
 |-------|----------------|---------------------------|
 | **GET** | `/health` | — |
 | **GET** | `/metrics` | — |
-| **GET** | `/online/summary` | **`/summary`** |
-| **GET** | `/online/services` | **`/services`** |
+| **GET** | `/summary` | — |
+| **GET** | `/services` | — |
 | **GET** | `/online` | **`/list`** |
 | **POST** | `/admin/kick` | **`/kick`** |
 | **POST** | `/admin/kick-all` | **`/kick-all`** |
@@ -189,13 +191,11 @@ WebSocket: **`GET`** с Upgrade на **`/`** (любой путь вида **`/*
 **Локально** (прямой доступ к порту presence-ws, по умолчанию **`8765`**):
 
 ```bash
-# Компактная сводка: total + breakdown[] + by_service{}  (дубли: /summary = /online/summary)
+# Компактная сводка: total + breakdown[] + by_service{}
 curl -sS http://127.0.0.1:8765/summary
-curl -sS http://127.0.0.1:8765/online/summary
 
-# Список меток — дубли: /services = /online/services
+# Список меток
 curl -sS http://127.0.0.1:8765/services
-curl -sS http://127.0.0.1:8765/online/services
 
 # Все сессии (= GET /list)
 curl -sS http://127.0.0.1:8765/list
@@ -216,9 +216,6 @@ BASE='https://devapp.uzcloud.uz/_presence'
 
 curl -sS "${BASE}/summary"
 curl -sS "${BASE}/services"
-# эквивалентно (если nginx не ломает путь):
-curl -sS "${BASE}/online/summary"
-curl -sS "${BASE}/online/services"
 curl -sS "${BASE}/list"
 curl -sS "${BASE}/online"
 curl -sS "${BASE}/online?client_service=edoc"
@@ -227,7 +224,7 @@ curl -sS "${BASE}/online?client_service=__none__"
 
 Подставь свой **`https://<домен>/_presence`** вместо `BASE`, если путь другой.
 
-**Nginx:** если **`.../_presence/online/summary`** пустой, а **`.../_presence/health`** ок — см. **`deploy/nginx-location-_presence.conf`** и раздел **«Nginx + Frappe»** в **`deploy/HOSTING.md`**: нужен **один** `location ^~ /_presence/` и **без** отдельного `location /_presence/online`. Пока конфиг не поправлен, используй те же односегментные пути, что и health: **`/_presence/summary`**, **`/_presence/services`**, **`/_presence/list`** (не `.../online/summary`).
+**Nginx:** если ответ на **`/_presence/online/...`** пустой, а **`/_presence/health`** ок — часто виноват отдельный `location` на **`/_presence/online`**. См. **`deploy/nginx-location-_presence.conf`** и **«Nginx + Frappe»** в **`deploy/HOSTING.md`**: один **`location ^~ /_presence/`** без узкого блока на **`online`**. Для API используй односегментные пути как у health: **`/_presence/summary`**, **`/_presence/services`**, **`/_presence/list`**.
 
 **Если задан `PRESENCE_X_API_TOKEN`** (или `METRICS_AUTH_TOKEN`), добавь заголовок ко всем **`GET`**:
 
@@ -237,7 +234,7 @@ curl -sS -H "X-Api-Token: $PRESENCE_X_API_TOKEN" http://127.0.0.1:8765/services
 curl -sS -H "Authorization: Bearer $PRESENCE_X_API_TOKEN" 'https://devapp.uzcloud.uz/_presence/online'
 ```
 
-(переменная **`BASE`** — из блока «За reverse proxy» выше; для одной команды можно подставить полный URL к **`/online`** или **`/online/services`**).
+(переменная **`BASE`** — из блока «За reverse proxy» выше; для одной команды можно подставить полный URL к **`/list`**, **`/online`**, **`/summary`** или **`/services`**.)
 
 Кратко (то же самое одной строкой для копирования):
 

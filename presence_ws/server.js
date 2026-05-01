@@ -848,8 +848,6 @@ const app = uWS
 	.get("/summary", httpGetOnlineSummary)
 	.get("/services", httpGetOnlineServices)
 	.get("/list", httpGetOnline)
-	.get("/online/summary", httpGetOnlineSummary)
-	.get("/online/services", httpGetOnlineServices)
 	.get("/online", httpGetOnline)
 	.post("/kick", httpPostAdminKick)
 	.post("/kick-all", httpPostAdminKickAll)
