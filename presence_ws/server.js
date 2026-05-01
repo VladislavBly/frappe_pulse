@@ -168,10 +168,18 @@ function filterClientsByService(clients, filterSpec) {
 	});
 }
 
-function buildOnlinePayload(req, clientsRaw, connectionsHint, source, redisStateStr) {
+/**
+ * @param {string | "__none__" | undefined} filterSpec — из query; парсить только синхронно (req в uWS невалиден в .then после async).
+ */
+function buildOnlinePayload(
+	filterSpec,
+	clientsRaw,
+	connectionsHint,
+	source,
+	redisStateStr,
+) {
 	const { tenant, service_id } = redisPresence.scope();
 
-	const filterSpec = parseOnlineServiceFilter(req);
 	const filtered = filterSpec !== undefined;
 	const clients = filtered
 		? filterClientsByService(clientsRaw, filterSpec)
@@ -661,6 +669,7 @@ function httpGetOnlineServices(res, req) {
 /** GET /online и GET /list — список clients, фильтры ?client_service / ?svc */
 function httpGetOnline(res, req) {
 	if (!assertGetAuthorized(req, res)) return;
+	const filterSpec = parseOnlineServiceFilter(req);
 	let aborted = false;
 	res.onAborted(() => {
 		aborted = true;
@@ -670,7 +679,7 @@ function httpGetOnline(res, req) {
 		jsonHttp(
 			res,
 			buildOnlinePayload(
-				req,
+				filterSpec,
 				clientsRaw,
 				clientsRaw.length,
 				"local",
@@ -688,7 +697,7 @@ function httpGetOnline(res, req) {
 			jsonHttp(
 				res,
 				buildOnlinePayload(
-					req,
+					filterSpec,
 					clientsRaw,
 					n ?? clientsRaw.length,
 					"redis",
