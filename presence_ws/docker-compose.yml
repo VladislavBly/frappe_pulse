@@ -18,10 +18,13 @@ services:
       PRESENCE_TENANT: "${PRESENCE_TENANT:-default}"
       PRESENCE_SERVICE_ID: "${PRESENCE_SERVICE_ID:-presence-ws}"
       # Frappe session verify before WebSocket upgrade (same secret as site_config pulse_presence_auth_secret):
+      # FRAPPE_PRESENCE_VERIFY_ENABLED: "false"   # временно без Frappe при заданных URL/SECRET
       # FRAPPE_PRESENCE_VERIFY_URL: "http://host.docker.internal:8000/api/pulse/internal/presence-ws-upgrade-verify"
       # FRAPPE_PRESENCE_VERIFY_SECRET: "${PULSE_PRESENCE_AUTH_SECRET:-}"
       # Optional: HTTP admin kick (POST /admin/kick, /admin/kick-all — header X-Admin-Token)
       # ADMIN_TOKEN: "long-random-secret"
+      # Optional: require X-Api-Token / Bearer for GET /health, /online, /metrics (Prometheus: bearer_token_file)
+      # PRESENCE_X_API_TOKEN: "long-random-read-secret"
     depends_on:
       - redis
     restart: unless-stopped

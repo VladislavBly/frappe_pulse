@@ -7,7 +7,21 @@ const FRAPPE_VERIFY_TIMEOUT_MS = Number.parseInt(
 	10,
 );
 
+function frappeVerifyExplicitlyDisabled() {
+	const v = (process.env.FRAPPE_PRESENCE_VERIFY_ENABLED || "")
+		.trim()
+		.toLowerCase();
+	return (
+		v === "0" ||
+		v === "false" ||
+		v === "off" ||
+		v === "no" ||
+		v === "disabled"
+	);
+}
+
 function isEnabled() {
+	if (frappeVerifyExplicitlyDisabled()) return false;
 	return Boolean(FRAPPE_VERIFY_URL && FRAPPE_VERIFY_SECRET);
 }
 

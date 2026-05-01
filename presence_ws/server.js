@@ -4,10 +4,17 @@ const crypto = require("crypto");
 const uWS = require("uwebsockets");
 const redisPresence = require("./redis-presence");
 const frappeVerify = require("./frappe-verify");
+const { renderPrometheusText } = require("./prometheus-metrics");
 
 const PORT = Number.parseInt(process.env.PORT || "8765", 10);
 const HOST = process.env.HOST || "0.0.0.0";
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
+/** If set, GET /health, /online, /metrics require matching X-Api-Token or Authorization: Bearer. */
+const PRESENCE_X_API_TOKEN = (
+	process.env.PRESENCE_X_API_TOKEN ||
+	process.env.METRICS_AUTH_TOKEN ||
+	""
+).trim();
 const startedAt = Date.now();
 
 /** @type {Map<string, { ws: object, connectedAt: number, address: string, userKey: string }>} */
@@ -97,6 +104,36 @@ function jsonHttp(res, obj, status = "200 OK") {
 	res.writeStatus(status);
 	res.writeHeader("Content-Type", "application/json; charset=utf-8");
 	res.end(JSON.stringify(obj));
+}
+
+function prometheusHttp(res, body, status = "200 OK") {
+	res.writeStatus(status);
+	res.writeHeader(
+		"Content-Type",
+		"text/plain; version=0.0.4; charset=utf-8",
+	);
+	const t = typeof body === "string" ? body : String(body);
+	res.end(t.endsWith("\n") ? t : `${t}\n`);
+}
+
+function parseXApiToken(req) {
+	const bearer = (req.getHeader("authorization") || "").trim();
+	const m = /^Bearer\s+(.+)$/i.exec(bearer);
+	if (m) return m[1].trim();
+	const x = (req.getHeader("x-api-token") || "").trim();
+	if (x) return x;
+	return (req.getHeader("x-metrics-token") || "").trim();
+}
+
+function assertGetAuthorized(req, res) {
+	if (!PRESENCE_X_API_TOKEN) return true;
+	if (parseXApiToken(req) !== PRESENCE_X_API_TOKEN) {
+		res.cork(() =>
+			jsonHttp(res, { ok: false, error: "forbidden" }, "403 Forbidden"),
+		);
+		return false;
+	}
+	return true;
 }
 
 function parseAdminToken(req) {
@@ -337,7 +374,8 @@ function onClientMessage(ws, text) {
 
 const app = uWS
 	.App()
-	.get("/health", (res) => {
+	.get("/health", (res, req) => {
+		if (!assertGetAuthorized(req, res)) return;
 		let aborted = false;
 		res.onAborted(() => {
 			aborted = true;
@@ -352,7 +390,45 @@ const app = uWS
 				jsonHttp(res, { status: "error" }, "500 Internal Server Error");
 			});
 	})
-	.get("/online", (res) => {
+	.get("/metrics", (res, req) => {
+		if (!assertGetAuthorized(req, res)) return;
+		let aborted = false;
+		res.onAborted(() => {
+			aborted = true;
+		});
+		healthPayloadAsync()
+			.then((payload) => {
+				if (aborted) return;
+				const text = renderPrometheusText(payload, {
+					uptimeSec: (Date.now() - startedAt) / 1000,
+					redisReady: redisPresence.ready(),
+					frappeVerifyEnabled: frappeVerify.isEnabled(),
+					adminHttpEnabled: Boolean(ADMIN_TOKEN),
+				});
+				res.cork(() => {
+					if (aborted) return;
+					prometheusHttp(res, text);
+				});
+			})
+			.catch(() => {
+				if (aborted) return;
+				res.cork(() => {
+					if (aborted) return;
+					prometheusHttp(
+						res,
+						[
+							"# HELP presence_ws_scrape_error 1 if /metrics could not read presence state.",
+							"# TYPE presence_ws_scrape_error gauge",
+							"presence_ws_scrape_error 1",
+							"",
+						].join("\n"),
+						"500 Internal Server Error",
+					);
+				});
+			});
+	})
+	.get("/online", (res, req) => {
+		if (!assertGetAuthorized(req, res)) return;
 		let aborted = false;
 		res.onAborted(() => {
 			aborted = true;
@@ -656,7 +732,7 @@ process.on("SIGINT", () => shutdown("SIGINT"));
 		}
 		const rs = redisPresence.redisState();
 		console.log(
-			`presence-ws uWebSockets.js http://${HOST}:${PORT} health=/health online=/online admin_http=${ADMIN_TOKEN ? "on" : "off"} redis=${rs} frappe_verify=${frappeVerify.isEnabled() ? "on" : "off"}`,
+			`presence-ws uWebSockets.js http://${HOST}:${PORT} health=/health metrics=/metrics online=/online get_auth=${PRESENCE_X_API_TOKEN ? "on" : "off"} admin_http=${ADMIN_TOKEN ? "on" : "off"} redis=${rs} frappe_verify=${frappeVerify.isEnabled() ? "on" : "off"}`,
 		);
 	});
 })();

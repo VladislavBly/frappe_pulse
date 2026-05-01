@@ -44,24 +44,49 @@ function wsToHttpOnline(wsUrl) {
 	return u.toString();
 }
 
+function readXApiToken() {
+	return (
+		process.env.PRESENCE_X_API_TOKEN ||
+		process.env.METRICS_AUTH_TOKEN ||
+		""
+	).trim();
+}
+
 function httpGetJson(urlStr) {
+	const token = readXApiToken();
+	const u = new URL(urlStr);
+	const isHttps = u.protocol === "https:";
+	const lib = isHttps ? require("https") : http;
+	const headers = {};
+	if (token) headers["X-Api-Token"] = token;
+
 	return new Promise((resolve, reject) => {
-		const req = http.get(urlStr, (res) => {
-			let body = "";
-			res.on("data", (c) => (body += c));
-			res.on("end", () => {
-				try {
-					resolve(JSON.parse(body));
-				} catch {
-					resolve({ raw: body, status: res.statusCode });
-				}
-			});
-		});
+		const req = lib.request(
+			{
+				hostname: u.hostname,
+				port: u.port || (isHttps ? 443 : 80),
+				path: `${u.pathname}${u.search}`,
+				method: "GET",
+				headers,
+			},
+			(res) => {
+				let body = "";
+				res.on("data", (c) => (body += c));
+				res.on("end", () => {
+					try {
+						resolve(JSON.parse(body));
+					} catch {
+						resolve({ raw: body, status: res.statusCode });
+					}
+				});
+			},
+		);
 		req.on("error", reject);
 		req.setTimeout(8000, () => {
 			req.destroy();
 			reject(new Error("timeout"));
 		});
+		req.end();
 	});
 }
 
@@ -84,7 +109,7 @@ function localHelp() {
 
 Команды в > :
   help          — эта справка
-  health        — HTTP GET /health  →  [HTTP /health]
+  health        — HTTP GET /health (если задан PRESENCE_X_API_TOKEN — передаётся в заголовке)
   stat / stats  — то же, что health
   online        — HTTP GET /online (полный список из Redis)  →  [HTTP /online]
   kick <uuid>   — HTTP POST /admin/kick (нужен ADMIN_TOKEN в env)

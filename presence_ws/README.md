@@ -1,14 +1,14 @@
 # presence-ws
 
-На одном порту: **HTTP** (`/health`, **`/online`**) и **WebSocket** на корне. Сервер — **uWebSockets.js** (npm `uwebsockets`). Образ Docker — **Debian bookworm-slim** (нативный аддон рассчитан на glibc, не Alpine).
+На одном порту: **HTTP** (`/health`, **`/metrics`** (Prometheus), **`/online`**) и **WebSocket** на корне. Сервер — **uWebSockets.js** (npm `uwebsockets`). Образ Docker — **Debian bookworm-slim** (нативный аддон рассчитан на glibc, не Alpine).
 
-**Идентификатор пользователя (opaque) обязателен**, если **не** включена проверка через Frappe (см. таблицу **`FRAPPE_PRESENCE_VERIFY_*`** ниже): его нужно передать **в query при установлении WebSocket** — в том же URL, куда клиент делает запрос **HTTP Upgrade** (`GET` с заголовком `Upgrade: websocket`). Параметры **`?user_id=...`** или **`?sub=...`** (до 512 символов). Если ни одного не передали или строка пустая, сервер **не выполняет апгрейд**: ответ **HTTP 403**, до протокола WebSocket дело не доходит (ни **`welcome`**, ни событий сокета).
+**Идентификатор пользователя (opaque) обязателен**, если **не** включена проверка через Frappe (см. **`FRAPPE_PRESENCE_VERIFY_*`** и флаг **`FRAPPE_PRESENCE_VERIFY_ENABLED`** ниже): его нужно передать **в query при установлении WebSocket** — в том же URL, куда клиент делает запрос **HTTP Upgrade** (`GET` с заголовком `Upgrade: websocket`). Параметры **`?user_id=...`** или **`?sub=...`** (до 512 символов). Если ни одного не передали или строка пустая, сервер **не выполняет апгрейд**: ответ **HTTP 403**, до протокола WebSocket дело не доходит (ни **`welcome`**, ни событий сокета).
 
 Несколько сокетов с **одинаковым** `user_id` считаются **одним** пользователем: в ответах **`unique_users`**, в Redis — SET `uniq` + refcount.
 
-**Redis:** сессии в **HASH** `sessions`, уникальные `user_id` в **SET** `uniq`, refcount в **HASH** `ref` (см. ключи с hash-tag в `redis-presence.js`). **`GET /health`** и **`GET /online`** возвращают **`connections`** (все сокеты) и **`unique_users`** (разные `user_id`).
+**Redis:** сессии в **HASH** `sessions`, уникальные `user_id` в **SET** `uniq`, refcount в **HASH** `ref` (см. ключи с hash-tag в `redis-presence.js`). **`GET /health`**, **`GET /metrics`** и **`GET /online`** отражают **`connections`** и **`unique_users`** (в JSON и в метриках).
 
-В событиях присутствия **нет** счётчиков: **`welcome`** / **`join`** / **`leave`** содержат **`session_id`** (UUID этой сессии, уникальная на каждое подключение), **`clientId`** (то же значение, совместимость), **`user_id`** (opaque пользователя). Полные цифры — только **`GET /health`**, **`GET /online`**, **`info`** / **`stats`** по сокету.
+В событиях присутствия **нет** счётчиков: **`welcome`** / **`join`** / **`leave`** содержат **`session_id`** (UUID этой сессии, уникальная на каждое подключение), **`clientId`** (то же значение, совместимость), **`user_id`** (opaque пользователя). Полные цифры — **`GET /health`**, **`GET /metrics`**, **`GET /online`**, **`info`** / **`stats`** по сокету.
 
 ### Переменные окружения (Redis и масштаб)
 
@@ -19,9 +19,47 @@
 | **`PRESENCE_TENANT`** | Префикс логического tenant (по умолчанию `default`). |
 | **`PRESENCE_SERVICE_ID`** | Идентификатор сервиса (по умолчанию `presence-ws`). |
 | **`NODE_INSTANCE_ID`** | Метка ноды в JSON сессии в Redis (по умолчанию `HOSTNAME` или `node`). |
-| **`FRAPPE_PRESENCE_VERIFY_URL`** | **POST** на Frappe, например `http://backend:8000/api/pulse/internal/presence-ws-upgrade-verify`. Задаётся **вместе** с **`FRAPPE_PRESENCE_VERIFY_SECRET`** — тогда WebSocket **не** принимает произвольный `user_id` из query: идентификатор берётся только после ответа Frappe. |
+| **`FRAPPE_PRESENCE_VERIFY_URL`** | **POST** на Frappe, например `http://backend:8000/api/pulse/internal/presence-ws-upgrade-verify`. Задаётся **вместе** с **`FRAPPE_PRESENCE_VERIFY_SECRET`** и при включённой проверке WebSocket **не** принимает произвольный `user_id` из query: идентификатор берётся только после ответа Frappe. |
 | **`FRAPPE_PRESENCE_VERIFY_SECRET`** | Совпадает с **`pulse_presence_auth_secret`** в `site_config.json` сайта Frappe (заголовок **`X-Pulse-Presence-Secret`**). |
 | **`FRAPPE_PRESENCE_VERIFY_TIMEOUT_MS`** | Таймаут запроса к Frappe при Upgrade (по умолчанию **5000**). |
+| **`FRAPPE_PRESENCE_VERIFY_ENABLED`** | **`false`** / **`0`** / **`off`** / **`no`** / **`disabled`** — **выключить** проверку Frappe при Upgrade, даже если заданы **`FRAPPE_PRESENCE_VERIFY_URL`** и **`FRAPPE_PRESENCE_VERIFY_SECRET`** (временно для тестов без Frappe). Пусто или **`true`** — включено, когда URL и секрет заданы. |
+| **`PRESENCE_X_API_TOKEN`** | Если задан — все **`GET`** (`/health`, `/online`, `/metrics`) только с заголовком **`X-Api-Token: <token>`** или **`Authorization: Bearer <token>`**. Для Prometheus можно по-прежнему использовать **`bearer_token_file`**. Устаревший алиас: **`METRICS_AUTH_TOKEN`** (то же значение, если `PRESENCE_X_API_TOKEN` пуст). |
+
+### Prometheus и Grafana
+
+**`GET /metrics`** отдаёт текст в формате **Prometheus** (`Content-Type: text/plain; version=0.0.4`). Счётчики совпадают по смыслу с **`/health`**: `presence_ws_connections`, `presence_ws_connections_local`, `presence_ws_unique_users`, `presence_ws_uptime_seconds`, `presence_ws_redis_connected`, плюс флаги `presence_ws_frappe_upgrade_verify_enabled`, `presence_ws_admin_http_enabled`.
+
+Проверка с хоста:
+
+```bash
+curl -sS http://127.0.0.1:8765/metrics | head -40
+# при заданном PRESENCE_X_API_TOKEN:
+# curl -sS -H "X-Api-Token: $PRESENCE_X_API_TOKEN" http://127.0.0.1:8765/metrics | head -40
+```
+
+Фрагмент **`prometheus.yml`**:
+
+```yaml
+scrape_configs:
+  - job_name: presence_ws
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["127.0.0.1:8765"]
+    # Если задан PRESENCE_X_API_TOKEN (или METRICS_AUTH_TOKEN) у presence-ws:
+    # bearer_token_file: /run/secrets/presence_metrics_bearer
+```
+
+В **Grafana** добавьте источник **Prometheus** и панели по именам метрик выше (лейблы **`tenant`**, **`service_id`**).
+
+### Деплой на сервер (кратко)
+
+1. **`docker compose up -d`** в каталоге `presence_ws` (или свой compose с теми же образом/переменными). Redis должен быть доступен контейнеру `presence-ws` по **`REDIS_URL`**.
+2. **Порт 8765** наружу — только если нужен доступ с клиентов; в проде часто оставляют доступ **только из внутренней сети** или за reverse proxy с TLS.
+3. **Прокси** (Nginx / Caddy / Traefik): для WebSocket пробросьте **`Upgrade`** и **`Connection`**; **`/health`**, **`/online`**, **`/metrics`** и **`/admin/*`** ограничьте по IP/VPN, если задан **`PRESENCE_X_API_TOKEN`** — прокси должен пробрасывать заголовок к upstream (или ограничить доступ только Prometheus).
+4. **Несколько реплик:** scrape **каждую** реплику Prometheus’ом; `presence_ws_connections` при работающем Redis отражает кластер, `presence_ws_connections_local` — только эту ноду. Суммировать «local» по всем подам как «всего соединений» обычно **нельзя** (двойной счёт), ориентируйтесь на Redis-агрегат или на один срез.
+
+---
 
 ### Проверка сессии через Frappe (`pulse_app`)
 
@@ -53,7 +91,7 @@
 
    Параметр **`sid`** в query или cookie **`sid`** на том же хосте, что и presence, имеет смысл в основном при **прокси с одним origin** (чтобы браузер прислал cookie на тот же хост, куда уходит Upgrade).
 
-4. Пока **`FRAPPE_PRESENCE_VERIFY_URL` / `FRAPPE_PRESENCE_VERIFY_SECRET`** **не** заданы, поведение как раньше: в query обязательны **`user_id`** или **`sub`** (без проверки Frappe).
+4. Пока проверка Frappe **выключена** (нет **`FRAPPE_PRESENCE_VERIFY_URL`+`SECRET`**, либо **`FRAPPE_PRESENCE_VERIFY_ENABLED=false`** и т.п.), поведение как раньше: в query обязательны **`user_id`** или **`sub`** (без проверки Frappe).
 
 ---
 
@@ -131,6 +169,7 @@ curl -sS -X POST "http://127.0.0.1:8765/admin/kick" \
 ```bash
 curl -s http://127.0.0.1:8765/health
 curl -s http://127.0.0.1:8765/online
+# при PRESENCE_X_API_TOKEN: -H "X-Api-Token: …"
 ```
 
 ### Статистика без `docker exec`
@@ -140,6 +179,7 @@ curl -s http://127.0.0.1:8765/online
 ```bash
 curl -s http://127.0.0.1:8765/health
 curl -s http://127.0.0.1:8765/online
+# при PRESENCE_X_API_TOKEN: -H "X-Api-Token: …"
 ```
 
 Или, если клонировали репозиторий и Node есть локально (запрос тот же — по умолчанию `http://127.0.0.1:8765/health`):
