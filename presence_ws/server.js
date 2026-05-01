@@ -575,6 +575,89 @@ function onClientMessage(ws, text) {
 	void handleCommand(ws, cmd, payload);
 }
 
+/** Локальный GET — короткие пути для nginx без конфликта с префиксом `/online` (`/_presence/summary`). */
+function httpGetOnlineSummary(res, req) {
+	if (!assertGetAuthorized(req, res)) return;
+	let aborted = false;
+	res.onAborted(() => {
+		aborted = true;
+	});
+	if (!redisPresence.ready()) {
+		const clientsRaw = peerList();
+		jsonHttp(
+			res,
+			buildOnlineSummaryPayload(
+				clientsRaw,
+				clientsRaw.length,
+				"local",
+				redisPresence.redisState(),
+			),
+		);
+		return;
+	}
+	Promise.all([
+		redisPresence.listOnline(),
+		redisPresence.countOnline(),
+	])
+		.then(([clientsRaw, n]) => {
+			if (aborted) return;
+			jsonHttp(
+				res,
+				buildOnlineSummaryPayload(
+					clientsRaw,
+					n ?? clientsRaw.length,
+					"redis",
+					redisPresence.redisState(),
+				),
+			);
+		})
+		.catch(() => {
+			if (aborted) return;
+			jsonHttp(res, { status: "error" }, "500 Internal Server Error");
+		});
+}
+
+function httpGetOnlineServices(res, req) {
+	if (!assertGetAuthorized(req, res)) return;
+	let aborted = false;
+	res.onAborted(() => {
+		aborted = true;
+	});
+	if (!redisPresence.ready()) {
+		const clientsRaw = peerList();
+		jsonHttp(
+			res,
+			buildOnlineServicesPayload(
+				clientsRaw,
+				clientsRaw.length,
+				"local",
+				redisPresence.redisState(),
+			),
+		);
+		return;
+	}
+	Promise.all([
+		redisPresence.listOnline(),
+		redisPresence.countOnline(),
+	])
+		.then(([clientsRaw, n]) => {
+			if (aborted) return;
+			jsonHttp(
+				res,
+				buildOnlineServicesPayload(
+					clientsRaw,
+					n ?? clientsRaw.length,
+					"redis",
+					redisPresence.redisState(),
+				),
+			);
+		})
+		.catch(() => {
+			if (aborted) return;
+			jsonHttp(res, { status: "error" }, "500 Internal Server Error");
+		});
+}
+
 const app = uWS
 	.App()
 	.get("/health", (res, req) => {
@@ -630,86 +713,10 @@ const app = uWS
 				});
 			});
 	})
-	.get("/online/summary", (res, req) => {
-		if (!assertGetAuthorized(req, res)) return;
-		let aborted = false;
-		res.onAborted(() => {
-			aborted = true;
-		});
-		if (!redisPresence.ready()) {
-			const clientsRaw = peerList();
-			jsonHttp(
-				res,
-				buildOnlineSummaryPayload(
-					clientsRaw,
-					clientsRaw.length,
-					"local",
-					redisPresence.redisState(),
-				),
-			);
-			return;
-		}
-		Promise.all([
-			redisPresence.listOnline(),
-			redisPresence.countOnline(),
-		])
-			.then(([clientsRaw, n]) => {
-				if (aborted) return;
-				jsonHttp(
-					res,
-					buildOnlineSummaryPayload(
-						clientsRaw,
-						n ?? clientsRaw.length,
-						"redis",
-						redisPresence.redisState(),
-					),
-				);
-			})
-			.catch(() => {
-				if (aborted) return;
-				jsonHttp(res, { status: "error" }, "500 Internal Server Error");
-			});
-	})
-	.get("/online/services", (res, req) => {
-		if (!assertGetAuthorized(req, res)) return;
-		let aborted = false;
-		res.onAborted(() => {
-			aborted = true;
-		});
-		if (!redisPresence.ready()) {
-			const clientsRaw = peerList();
-			jsonHttp(
-				res,
-				buildOnlineServicesPayload(
-					clientsRaw,
-					clientsRaw.length,
-					"local",
-					redisPresence.redisState(),
-				),
-			);
-			return;
-		}
-		Promise.all([
-			redisPresence.listOnline(),
-			redisPresence.countOnline(),
-		])
-			.then(([clientsRaw, n]) => {
-				if (aborted) return;
-				jsonHttp(
-					res,
-					buildOnlineServicesPayload(
-						clientsRaw,
-						n ?? clientsRaw.length,
-						"redis",
-						redisPresence.redisState(),
-					),
-				);
-			})
-			.catch(() => {
-				if (aborted) return;
-				jsonHttp(res, { status: "error" }, "500 Internal Server Error");
-			});
-	})
+	.get("/summary", httpGetOnlineSummary)
+	.get("/services", httpGetOnlineServices)
+	.get("/online/summary", httpGetOnlineSummary)
+	.get("/online/services", httpGetOnlineServices)
 	.get("/online", (res, req) => {
 		if (!assertGetAuthorized(req, res)) return;
 		let aborted = false;
