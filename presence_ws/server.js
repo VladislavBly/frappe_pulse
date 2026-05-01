@@ -17,7 +17,10 @@ const PRESENCE_X_API_TOKEN = (
 ).trim();
 const startedAt = Date.now();
 
-/** @type {Map<string, { ws: object, connectedAt: number, address: string, userKey: string }>} */
+/** Max length for optional client_service query (origin label). */
+const CLIENT_SERVICE_MAX = 64;
+
+/** @type {Map<string, { ws: object, connectedAt: number, address: string, userKey: string, clientService?: string }>} */
 const clientsById = new Map();
 
 let listenSocket = null;
@@ -38,6 +41,19 @@ function parseQueryUserId(req) {
 	const raw = req.getQuery("user_id") || req.getQuery("sub");
 	if (raw && String(raw).trim()) return String(raw).trim().slice(0, 512);
 	return null;
+}
+
+/** Optional label: who connected (desk, mobile-app, …). Query: client_service, svc, from, service. */
+function parseClientService(req) {
+	const raw =
+		req.getQuery("client_service") ||
+		req.getQuery("svc") ||
+		req.getQuery("from") ||
+		req.getQuery("service");
+	if (raw && String(raw).trim()) {
+		return String(raw).trim().slice(0, CLIENT_SERVICE_MAX);
+	}
+	return "";
 }
 
 function remoteAddressText(req) {
@@ -62,13 +78,15 @@ function remoteAddressText(req) {
 function peerList() {
 	const clients = [];
 	for (const [sessionId, meta] of clientsById) {
-		clients.push({
+		const row = {
 			id: sessionId,
 			session_id: sessionId,
 			connectedAt: meta.connectedAt,
 			address: meta.address,
 			user_id: meta.userKey,
-		});
+		};
+		if (meta.clientService) row.client_service = meta.clientService;
+		clients.push(row);
 	}
 	return clients;
 }
@@ -325,15 +343,20 @@ function copyWsUpgradeHeaders(req) {
 	};
 }
 
-function commitWsUpgrade(res, context, userKey, headers, address) {
+function commitWsUpgrade(res, context, userKey, headers, address, clientService) {
 	const sessionId = crypto.randomUUID();
 	const connectedAt = Date.now();
+	const cs =
+		clientService && String(clientService).trim()
+			? String(clientService).trim().slice(0, CLIENT_SERVICE_MAX)
+			: "";
 	res.upgrade(
 		{
 			sessionId,
 			userKey,
 			address,
 			connectedAt,
+			clientService: cs,
 		},
 		headers.secWebSocketKey,
 		headers.secWebSocketProtocol,
@@ -561,6 +584,7 @@ const app = uWS
 		upgrade: (res, req, context) => {
 			const headers = copyWsUpgradeHeaders(req);
 			const address = remoteAddressText(req);
+			const clientService = parseClientService(req);
 
 			if (!frappeVerify.isEnabled()) {
 				const userKey = parseQueryUserId(req);
@@ -574,7 +598,14 @@ const app = uWS
 					res.end("user_id or sub query parameter required");
 					return;
 				}
-				commitWsUpgrade(res, context, userKey, headers, address);
+				commitWsUpgrade(
+					res,
+					context,
+					userKey,
+					headers,
+					address,
+					clientService,
+				);
 				return;
 			}
 
@@ -609,6 +640,7 @@ const app = uWS
 							result.userKey,
 							headers,
 							address,
+							clientService,
 						);
 					});
 				})
@@ -627,45 +659,56 @@ const app = uWS
 			const userKey = d.userKey;
 			const address = d.address;
 			const connectedAt = d.connectedAt;
+			const clientService = d.clientService || "";
 
-			clientsById.set(sessionId, {
+			const meta = {
 				ws,
 				connectedAt,
 				address,
 				userKey,
-			});
+			};
+			if (clientService) meta.clientService = clientService;
+			clientsById.set(sessionId, meta);
 
 			console.log(
 				"CONNECT",
 				address,
 				sessionId,
 				userKey,
+				clientService || "-",
 				"total",
 				connectionCount(),
 			);
 
+			const redisMeta = {
+				connectedAt,
+				address,
+				user_id: userKey,
+			};
+			if (clientService) redisMeta.client_service = clientService;
+
 			redisPresence
-				.recordConnect(sessionId, {
-					connectedAt,
-					address,
-					user_id: userKey,
-				})
+				.recordConnect(sessionId, redisMeta)
 				.catch((e) => console.error("redis recordConnect", e.message));
 
-			sendWsJson(ws, {
+			const welcome = {
 				event: "welcome",
 				message: "presence-ws",
 				session_id: sessionId,
 				clientId: sessionId,
 				user_id: userKey,
-			});
+			};
+			if (clientService) welcome.client_service = clientService;
+			sendWsJson(ws, welcome);
 
-			broadcastExcept(ws, {
+			const join = {
 				event: "join",
 				session_id: sessionId,
 				clientId: sessionId,
 				user_id: userKey,
-			});
+			};
+			if (clientService) join.client_service = clientService;
+			broadcastExcept(ws, join);
 		},
 		message: (ws, message, isBinary) => {
 			if (isBinary) return;
@@ -677,16 +720,19 @@ const app = uWS
 			const sid = d.sessionId;
 			const uk = d.userKey;
 			const address = d.address;
+			const clientService = d.clientService || "";
 			clientsById.delete(sid);
 			redisPresence
 				.recordDisconnect(sid)
 				.catch((e) => console.error("redis recordDisconnect", e.message));
-			broadcastExcept(ws, {
+			const leave = {
 				event: "leave",
 				session_id: sid,
 				clientId: sid,
 				user_id: uk,
-			});
+			};
+			if (clientService) leave.client_service = clientService;
+			broadcastExcept(ws, leave);
 			console.log(
 				"DISCONNECT",
 				address,

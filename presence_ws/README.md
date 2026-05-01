@@ -2,13 +2,13 @@
 
 На одном порту: **HTTP** (`/health`, **`/metrics`** (Prometheus), **`/online`**) и **WebSocket** на корне. Сервер — **uWebSockets.js** (npm `uwebsockets`). Образ Docker — **Debian bookworm-slim** (нативный аддон рассчитан на glibc, не Alpine).
 
-**Идентификатор пользователя (opaque) обязателен**, если **не** включена проверка через Frappe (см. **`FRAPPE_PRESENCE_VERIFY_*`** и флаг **`FRAPPE_PRESENCE_VERIFY_ENABLED`** ниже): его нужно передать **в query при установлении WebSocket** — в том же URL, куда клиент делает запрос **HTTP Upgrade** (`GET` с заголовком `Upgrade: websocket`). Параметры **`?user_id=...`** или **`?sub=...`** (до 512 символов). Если ни одного не передали или строка пустая, сервер **не выполняет апгрейд**: ответ **HTTP 403**, до протокола WebSocket дело не доходит (ни **`welcome`**, ни событий сокета).
+**Идентификатор пользователя (opaque) обязателен**, если **не** включена проверка через Frappe (см. **`FRAPPE_PRESENCE_VERIFY_*`** и флаг **`FRAPPE_PRESENCE_VERIFY_ENABLED`** ниже): его нужно передать **в query при установлении WebSocket** — в том же URL, куда клиент делает запрос **HTTP Upgrade** (`GET` с заголовком `Upgrade: websocket`). Параметры **`?user_id=...`** или **`?sub=...`** (до 512 символов). Опционально метка источника клиента: **`?client_service=...`**, или коротко **`?svc=...`**, **`?from=...`**, **`?service=...`** (до 64 символов) — попадает в события **`welcome`** / **`join`** / **`leave`** как **`client_service`**, в **`GET /online`** и в **`info`** → **`clients`**. Если ни одного не передали или строка пустая, сервер **не выполняет апгрейд**: ответ **HTTP 403**, до протокола WebSocket дело не доходит (ни **`welcome`**, ни событий сокета).
 
 Несколько сокетов с **одинаковым** `user_id` считаются **одним** пользователем: в ответах **`unique_users`**, в Redis — SET `uniq` + refcount.
 
 **Redis:** сессии в **HASH** `sessions`, уникальные `user_id` в **SET** `uniq`, refcount в **HASH** `ref` (см. ключи с hash-tag в `redis-presence.js`). **`GET /health`**, **`GET /metrics`** и **`GET /online`** отражают **`connections`** и **`unique_users`** (в JSON и в метриках).
 
-В событиях присутствия **нет** счётчиков: **`welcome`** / **`join`** / **`leave`** содержат **`session_id`** (UUID этой сессии, уникальная на каждое подключение), **`clientId`** (то же значение, совместимость), **`user_id`** (opaque пользователя). Полные цифры — **`GET /health`**, **`GET /metrics`**, **`GET /online`**, **`info`** / **`stats`** по сокету.
+В событиях присутствия **нет** счётчиков: **`welcome`** / **`join`** / **`leave`** содержат **`session_id`** (UUID этой сессии, уникальная на каждое подключение), **`clientId`** (то же значение, совместимость), **`user_id`** (opaque пользователя), при передаче в URL — **`client_service`** (метка источника). Полные цифры — **`GET /health`**, **`GET /metrics`**, **`GET /online`**, **`info`** / **`stats`** по сокету.
 
 ### Переменные окружения (Redis и масштаб)
 

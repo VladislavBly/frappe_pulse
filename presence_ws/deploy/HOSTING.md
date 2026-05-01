@@ -79,6 +79,7 @@ cd presence_ws && docker compose build presence-ws && docker compose up -d
 | Файл | Назначение |
 |------|------------|
 | `env.example` | Шаблон `.env` для compose |
-| `Caddyfile.example` | Пример TLS + WebSocket + проброс заголовков |
+| `Caddyfile.example` | Пример TLS + WebSocket (Caddy) |
+| `install-nginx-wss-devapp.sh` | **Nginx** + `wss` для **`ws.devapp.uzcloud.uz`** (Let’s Encrypt пути в скрипте); из **`presence_ws`**: `sudo bash deploy/install-nginx-wss-devapp.sh` |
 
 Подробности по API и Frappe — в **`../README.md`**.

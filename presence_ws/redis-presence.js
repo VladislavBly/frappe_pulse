@@ -122,7 +122,7 @@ async function countUniqueUsers() {
 }
 
 /**
- * @returns {Promise<{ id: string, session_id: string, connectedAt: number, address: string, node?: string, user_id: string }[]>}
+ * @returns {Promise<{ id: string, session_id: string, connectedAt: number, address: string, node?: string, user_id: string, client_service?: string }[]>}
  */
 async function listOnline() {
 	if (!ready()) return [];
@@ -131,14 +131,16 @@ async function listOnline() {
 	for (const [id, json] of Object.entries(raw)) {
 		try {
 			const o = JSON.parse(json);
-			out.push({
+			const row = {
 				id,
 				session_id: id,
 				connectedAt: o.connectedAt,
 				address: o.address,
 				node: o.node,
 				user_id: o.user_id || `anon:${id}`,
-			});
+			};
+			if (o.client_service) row.client_service = o.client_service;
+			out.push(row);
 		} catch {
 			out.push({
 				id,
