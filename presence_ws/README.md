@@ -1,8 +1,8 @@
 # presence-ws
 
-На одном порту: **HTTP** (`/health`, **`/metrics`** (Prometheus), **`/online`**) и **WebSocket** на корне. Сервер — **uWebSockets.js** (npm `uwebsockets`). Образ Docker — **Debian bookworm-slim** (нативный аддон рассчитан на glibc, не Alpine).
+На одном порту: **HTTP** (`/health`, **`/metrics`** (Prometheus), **`/online`**, **`/online/services`**) и **WebSocket** на корне. Сервер — **uWebSockets.js** (npm `uwebsockets`). Образ Docker — **Debian bookworm-slim** (нативный аддон рассчитан на glibc, не Alpine).
 
-**Идентификатор пользователя (opaque) обязателен**, если **не** включена проверка через Frappe (см. **`FRAPPE_PRESENCE_VERIFY_*`** и флаг **`FRAPPE_PRESENCE_VERIFY_ENABLED`** ниже): его нужно передать **в query при установлении WebSocket** — в том же URL, куда клиент делает запрос **HTTP Upgrade** (`GET` с заголовком `Upgrade: websocket`). Параметры **`?user_id=...`** или **`?sub=...`** (до 512 символов). Опционально метка источника клиента: **`?client_service=...`**, или коротко **`?svc=...`**, **`?from=...`**, **`?service=...`** (до 64 символов) — попадает в события **`welcome`** / **`join`** / **`leave`** как **`client_service`**, в **`GET /online`** и в **`info`** → **`clients`**. Если ни одного не передали или строка пустая, сервер **не выполняет апгрейд**: ответ **HTTP 403**, до протокола WebSocket дело не доходит (ни **`welcome`**, ни событий сокета).
+**Идентификатор пользователя (opaque) обязателен**, если **не** включена проверка через Frappe (см. **`FRAPPE_PRESENCE_VERIFY_*`** и флаг **`FRAPPE_PRESENCE_VERIFY_ENABLED`** ниже): его нужно передать **в query при установлении WebSocket** — в том же URL, куда клиент делает запрос **HTTP Upgrade** (`GET` с заголовком `Upgrade: websocket`). Параметры **`?user_id=...`** или **`?sub=...`** (до 512 символов). Опционально метка источника клиента: **`?client_service=...`**, или коротко **`?svc=...`**, **`?from=...`**, **`?service=...`** (до 64 символов) — попадает в события **`welcome`** / **`join`** / **`leave`** как **`client_service`**, в **`GET /online`** → **`clients`**, сводка по меткам — **`GET /online/services`** (в **`info`** → **`clients`**). Если ни одного не передали или строка пустая, сервер **не выполняет апгрейд**: ответ **HTTP 403**, до протокола WebSocket дело не доходит (ни **`welcome`**, ни событий сокета).
 
 Несколько сокетов с **одинаковым** `user_id` считаются **одним** пользователем: в ответах **`unique_users`**, в Redis — SET `uniq` + refcount.
 
@@ -166,11 +166,14 @@ curl -sS -X POST "http://127.0.0.1:8765/admin/kick" \
 ### Быстрый онлайн по HTTP (документация / мониторинг)
 
 - **`GET /health`** — `connections` (все сокеты), **`unique_users`**, `connections_local`, `redis`, …
-- **`GET /online`** — `connections`, **`unique_users`**, массив **`clients`** (у каждой сессии поле **`user_id`**).
+- **`GET /online/services`** — только справочник меток и сводка по ним: **`services`**, **`service_stats`** (по каждой метке и «без метки»), плюс глобальные **`connections`** и **`unique_users`** по всем сессиям. Без массива **`clients`**.
+- **`GET /online`** — массив **`clients`** и те же глобальные счётчики (или при фильтре — только выбранная метка). Фильтр: **`?client_service=edoc`** или **`?svc=edoc`**; только без метки: **`?client_service=__none__`**. В ответе при фильтре поле **`filter`**.
 
 ```bash
 curl -s http://127.0.0.1:8765/health
+curl -s http://127.0.0.1:8765/online/services
 curl -s http://127.0.0.1:8765/online
+curl -s 'http://127.0.0.1:8765/online?client_service=edoc'
 # при PRESENCE_X_API_TOKEN: -H "X-Api-Token: …"
 ```
 
@@ -180,7 +183,9 @@ curl -s http://127.0.0.1:8765/online
 
 ```bash
 curl -s http://127.0.0.1:8765/health
+curl -s http://127.0.0.1:8765/online/services
 curl -s http://127.0.0.1:8765/online
+curl -s 'http://127.0.0.1:8765/online?client_service=edoc'
 # при PRESENCE_X_API_TOKEN: -H "X-Api-Token: …"
 ```
 

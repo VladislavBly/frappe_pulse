@@ -91,6 +91,147 @@ function peerList() {
 	return clients;
 }
 
+/** Unique users = distinct user_id in the same rows as clients (matches frontend Set). */
+function uniqueUsersFromClientRows(clients) {
+	const set = new Set();
+	for (const c of clients) {
+		const id = c && c.user_id;
+		if (id) set.add(id);
+	}
+	return set.size;
+}
+
+/** Stats per client_service tag (null = без метки). */
+function aggregateServiceStats(clients) {
+	/** @type {Map<string, { connections: number, users: Set<string> }>} */
+	const m = new Map();
+	for (const c of clients) {
+		const raw = c && c.client_service;
+		const key =
+			raw && String(raw).trim()
+				? String(raw).trim().slice(0, CLIENT_SERVICE_MAX)
+				: "__none__";
+		let bucket = m.get(key);
+		if (!bucket) {
+			bucket = { connections: 0, users: new Set() };
+			m.set(key, bucket);
+		}
+		bucket.connections += 1;
+		const uid = c && c.user_id;
+		if (uid) bucket.users.add(uid);
+	}
+	const rows = [];
+	for (const [key, b] of m) {
+		rows.push({
+			client_service: key === "__none__" ? null : key,
+			connections: b.connections,
+			unique_users: b.users.size,
+		});
+	}
+	rows.sort((a, b) => {
+		if (a.client_service == null && b.client_service == null) return 0;
+		if (a.client_service == null) return 1;
+		if (b.client_service == null) return -1;
+		return /** @type {string} */ (a.client_service).localeCompare(
+			/** @type {string} */ (b.client_service),
+		);
+	});
+	return rows;
+}
+
+function extractServiceNames(service_stats) {
+	return service_stats
+		.filter((s) => s.client_service != null)
+		.map((s) => /** @type {string} */ (s.client_service))
+		.sort((a, b) => a.localeCompare(b));
+}
+
+/** @returns {string | "__none__" | undefined} undefined = без фильтра */
+function parseOnlineServiceFilter(req) {
+	const raw =
+		(req.getQuery("client_service") || req.getQuery("svc") || "").trim();
+	if (!raw) return undefined;
+	const q = raw.slice(0, CLIENT_SERVICE_MAX);
+	if (q === "__none__" || q === "_none" || q === "-") return "__none__";
+	return q;
+}
+
+function filterClientsByService(clients, filterSpec) {
+	if (filterSpec === "__none__") {
+		return clients.filter(
+			(c) => !c.client_service || !String(c.client_service).trim(),
+		);
+	}
+	return clients.filter((c) => {
+		const cs = c.client_service && String(c.client_service).trim();
+		return cs === filterSpec;
+	});
+}
+
+function buildOnlinePayload(req, clientsRaw, connectionsHint, source, redisStateStr) {
+	const { tenant, service_id } = redisPresence.scope();
+
+	const filterSpec = parseOnlineServiceFilter(req);
+	const filtered = filterSpec !== undefined;
+	const clients = filtered
+		? filterClientsByService(clientsRaw, filterSpec)
+		: clientsRaw;
+
+	let connections;
+	if (filtered) {
+		connections = clients.length;
+	} else {
+		connections =
+			connectionsHint != null ? connectionsHint : clientsRaw.length;
+	}
+
+	const unique_users = uniqueUsersFromClientRows(clients);
+
+	const payload = {
+		source,
+		tenant,
+		service_id,
+		connections,
+		unique_users,
+		clients,
+		redis: redisStateStr,
+	};
+
+	if (filtered) {
+		payload.filter = {
+			client_service:
+				filterSpec === "__none__" ? null : filterSpec,
+		};
+	}
+
+	return payload;
+}
+
+/** Только агрегаты по меткам + глобальные connections/unique_users (без списка сессий). */
+function buildOnlineServicesPayload(
+	clientsRaw,
+	connectionsHint,
+	source,
+	redisStateStr,
+) {
+	const { tenant, service_id } = redisPresence.scope();
+	const service_stats = aggregateServiceStats(clientsRaw);
+	const services = extractServiceNames(service_stats);
+	const connections =
+		connectionsHint != null ? connectionsHint : clientsRaw.length;
+	const unique_users = uniqueUsersFromClientRows(clientsRaw);
+	return {
+		source,
+		tenant,
+		service_id,
+		connections,
+		unique_users,
+		services,
+		service_stats,
+		redis: redisStateStr,
+	};
+}
+
 function healthPayload() {
 	const { tenant, service_id } = redisPresence.scope();
 	const local = connectionCount();
@@ -450,41 +591,82 @@ const app = uWS
 				});
 			});
 	})
+	.get("/online/services", (res, req) => {
+		if (!assertGetAuthorized(req, res)) return;
+		let aborted = false;
+		res.onAborted(() => {
+			aborted = true;
+		});
+		if (!redisPresence.ready()) {
+			const clientsRaw = peerList();
+			jsonHttp(
+				res,
+				buildOnlineServicesPayload(
+					clientsRaw,
+					clientsRaw.length,
+					"local",
+					redisPresence.redisState(),
+				),
+			);
+			return;
+		}
+		Promise.all([
+			redisPresence.listOnline(),
+			redisPresence.countOnline(),
+		])
+			.then(([clientsRaw, n]) => {
+				if (aborted) return;
+				jsonHttp(
+					res,
+					buildOnlineServicesPayload(
+						clientsRaw,
+						n ?? clientsRaw.length,
+						"redis",
+						redisPresence.redisState(),
+					),
+				);
+			})
+			.catch(() => {
+				if (aborted) return;
+				jsonHttp(res, { status: "error" }, "500 Internal Server Error");
+			});
+	})
 	.get("/online", (res, req) => {
 		if (!assertGetAuthorized(req, res)) return;
 		let aborted = false;
 		res.onAborted(() => {
 			aborted = true;
 		});
-		const { tenant, service_id } = redisPresence.scope();
 		if (!redisPresence.ready()) {
-			jsonHttp(res, {
-				source: "local",
-				tenant,
-				service_id,
-				connections: connectionCount(),
-				unique_users: uniqueLocalCount(),
-				clients: peerList(),
-				redis: redisPresence.redisState(),
-			});
+			const clientsRaw = peerList();
+			jsonHttp(
+				res,
+				buildOnlinePayload(
+					req,
+					clientsRaw,
+					clientsRaw.length,
+					"local",
+					redisPresence.redisState(),
+				),
+			);
 			return;
 		}
 		Promise.all([
 			redisPresence.listOnline(),
 			redisPresence.countOnline(),
-			redisPresence.countUniqueUsers(),
 		])
-			.then(([clients, n, uq]) => {
+			.then(([clientsRaw, n]) => {
 				if (aborted) return;
-				jsonHttp(res, {
-					source: "redis",
-					tenant,
-					service_id,
-					connections: n ?? clients.length,
-					unique_users: uq ?? 0,
-					clients,
-					redis: redisPresence.redisState(),
-				});
+				jsonHttp(
+					res,
+					buildOnlinePayload(
+						req,
+						clientsRaw,
+						n ?? clientsRaw.length,
+						"redis",
+						redisPresence.redisState(),
+					),
+				);
 			})
 			.catch(() => {
 				if (aborted) return;
