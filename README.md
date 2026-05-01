@@ -4,7 +4,7 @@
 
 ## `presence_ws`
 
-Node.js WebSocket + HTTP (`/health`, **`/summary`**, **`/services`**, **`/online`** — примеры `curl` в README), консольный клиент (`npm run cli`), Docker — см. [`presence_ws/README.md`](presence_ws/README.md).
+Node.js WebSocket + HTTP (`/health`, **`/summary`**, **`/services`**, **`/list`**, **`/online`**, **`/kick`** — таблица путей в README), консольный клиент (`npm run cli`), Docker — см. [`presence_ws/README.md`](presence_ws/README.md).
 
 ---
 

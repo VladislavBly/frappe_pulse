@@ -658,6 +658,138 @@ function httpGetOnlineServices(res, req) {
 		});
 }
 
+/** GET /online и GET /list — список clients, фильтры ?client_service / ?svc */
+function httpGetOnline(res, req) {
+	if (!assertGetAuthorized(req, res)) return;
+	let aborted = false;
+	res.onAborted(() => {
+		aborted = true;
+	});
+	if (!redisPresence.ready()) {
+		const clientsRaw = peerList();
+		jsonHttp(
+			res,
+			buildOnlinePayload(
+				req,
+				clientsRaw,
+				clientsRaw.length,
+				"local",
+				redisPresence.redisState(),
+			),
+		);
+		return;
+	}
+	Promise.all([
+		redisPresence.listOnline(),
+		redisPresence.countOnline(),
+	])
+		.then(([clientsRaw, n]) => {
+			if (aborted) return;
+			jsonHttp(
+				res,
+				buildOnlinePayload(
+					req,
+					clientsRaw,
+					n ?? clientsRaw.length,
+					"redis",
+					redisPresence.redisState(),
+				),
+			);
+		})
+		.catch(() => {
+			if (aborted) return;
+			jsonHttp(res, { status: "error" }, "500 Internal Server Error");
+		});
+}
+
+function httpPostAdminKick(res, req) {
+	if (!assertAdminHttp(req, res)) return;
+	readJsonBody(
+		res,
+		8192,
+		(obj) => {
+			const sid =
+				obj &&
+				(obj.session_id || obj.id || obj.clientId || obj.target);
+			if (!sid || typeof sid !== "string") {
+				res.cork(() =>
+					jsonHttp(
+						res,
+						{ ok: false, error: "session_id required" },
+						"400 Bad Request",
+					),
+				);
+				return;
+			}
+			const id = sid.trim();
+			const r = kickSessionById(id);
+			if (r.notFound) {
+				res.cork(() =>
+					jsonHttp(
+						res,
+						{ ok: false, error: "not_found", session_id: id },
+						"404 Not Found",
+					),
+				);
+				return;
+			}
+			if (!r.ok) {
+				res.cork(() =>
+					jsonHttp(
+						res,
+						{ ok: false, error: r.error || "kick_failed" },
+						"500 Internal Server Error",
+					),
+				);
+				return;
+			}
+			res.cork(() => jsonHttp(res, { ok: true, session_id: id }));
+		},
+		(err) => {
+			if (err && err.message === "aborted") return;
+			const status =
+				err && err.message === "too_large"
+					? "413 Payload Too Large"
+					: "400 Bad Request";
+			const code =
+				err && err.message === "too_large" ? "too_large" : "invalid_json";
+			res.cork(() =>
+				jsonHttp(res, { ok: false, error: code }, status),
+			);
+		},
+	);
+}
+
+function httpPostAdminKickAll(res, req) {
+	if (!assertAdminHttp(req, res)) return;
+	const cl = Number.parseInt(req.getHeader("content-length") || "0", 10);
+	if (!cl || cl <= 0) {
+		const n = kickAllSessions();
+		res.cork(() => jsonHttp(res, { ok: true, disconnected: n }));
+		return;
+	}
+	readJsonBody(
+		res,
+		256,
+		() => {
+			const n = kickAllSessions();
+			res.cork(() => jsonHttp(res, { ok: true, disconnected: n }));
+		},
+		(err) => {
+			if (err && err.message === "aborted") return;
+			const status =
+				err && err.message === "too_large"
+					? "413 Payload Too Large"
+					: "400 Bad Request";
+			const code =
+				err && err.message === "too_large" ? "too_large" : "invalid_json";
+			res.cork(() =>
+				jsonHttp(res, { ok: false, error: code }, status),
+			);
+		},
+	);
+}
+
 const app = uWS
 	.App()
 	.get("/health", (res, req) => {
@@ -715,136 +847,14 @@ const app = uWS
 	})
 	.get("/summary", httpGetOnlineSummary)
 	.get("/services", httpGetOnlineServices)
+	.get("/list", httpGetOnline)
 	.get("/online/summary", httpGetOnlineSummary)
 	.get("/online/services", httpGetOnlineServices)
-	.get("/online", (res, req) => {
-		if (!assertGetAuthorized(req, res)) return;
-		let aborted = false;
-		res.onAborted(() => {
-			aborted = true;
-		});
-		if (!redisPresence.ready()) {
-			const clientsRaw = peerList();
-			jsonHttp(
-				res,
-				buildOnlinePayload(
-					req,
-					clientsRaw,
-					clientsRaw.length,
-					"local",
-					redisPresence.redisState(),
-				),
-			);
-			return;
-		}
-		Promise.all([
-			redisPresence.listOnline(),
-			redisPresence.countOnline(),
-		])
-			.then(([clientsRaw, n]) => {
-				if (aborted) return;
-				jsonHttp(
-					res,
-					buildOnlinePayload(
-						req,
-						clientsRaw,
-						n ?? clientsRaw.length,
-						"redis",
-						redisPresence.redisState(),
-					),
-				);
-			})
-			.catch(() => {
-				if (aborted) return;
-				jsonHttp(res, { status: "error" }, "500 Internal Server Error");
-			});
-	})
-	.post("/admin/kick", (res, req) => {
-		if (!assertAdminHttp(req, res)) return;
-		readJsonBody(
-			res,
-			8192,
-			(obj) => {
-				const sid =
-					obj &&
-					(obj.session_id || obj.id || obj.clientId || obj.target);
-				if (!sid || typeof sid !== "string") {
-					res.cork(() =>
-						jsonHttp(
-							res,
-							{ ok: false, error: "session_id required" },
-							"400 Bad Request",
-						),
-					);
-					return;
-				}
-				const id = sid.trim();
-				const r = kickSessionById(id);
-				if (r.notFound) {
-					res.cork(() =>
-						jsonHttp(
-							res,
-							{ ok: false, error: "not_found", session_id: id },
-							"404 Not Found",
-						),
-					);
-					return;
-				}
-				if (!r.ok) {
-					res.cork(() =>
-						jsonHttp(
-							res,
-							{ ok: false, error: r.error || "kick_failed" },
-							"500 Internal Server Error",
-						),
-					);
-					return;
-				}
-				res.cork(() => jsonHttp(res, { ok: true, session_id: id }));
-			},
-			(err) => {
-				if (err && err.message === "aborted") return;
-				const status =
-					err && err.message === "too_large"
-						? "413 Payload Too Large"
-						: "400 Bad Request";
-				const code =
-					err && err.message === "too_large" ? "too_large" : "invalid_json";
-				res.cork(() =>
-					jsonHttp(res, { ok: false, error: code }, status),
-				);
-			},
-		);
-	})
-	.post("/admin/kick-all", (res, req) => {
-		if (!assertAdminHttp(req, res)) return;
-		const cl = Number.parseInt(req.getHeader("content-length") || "0", 10);
-		if (!cl || cl <= 0) {
-			const n = kickAllSessions();
-			res.cork(() => jsonHttp(res, { ok: true, disconnected: n }));
-			return;
-		}
-		readJsonBody(
-			res,
-			256,
-			() => {
-				const n = kickAllSessions();
-				res.cork(() => jsonHttp(res, { ok: true, disconnected: n }));
-			},
-			(err) => {
-				if (err && err.message === "aborted") return;
-				const status =
-					err && err.message === "too_large"
-						? "413 Payload Too Large"
-						: "400 Bad Request";
-				const code =
-					err && err.message === "too_large" ? "too_large" : "invalid_json";
-				res.cork(() =>
-					jsonHttp(res, { ok: false, error: code }, status),
-				);
-			},
-		);
-	})
+	.get("/online", httpGetOnline)
+	.post("/kick", httpPostAdminKick)
+	.post("/kick-all", httpPostAdminKickAll)
+	.post("/admin/kick", httpPostAdminKick)
+	.post("/admin/kick-all", httpPostAdminKickAll)
 	.ws("/*", {
 		compression: uWS.SHARED_COMPRESSOR,
 		maxPayloadLength: 64 * 1024,
