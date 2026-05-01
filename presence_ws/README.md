@@ -227,7 +227,7 @@ curl -sS "${BASE}/online?client_service=__none__"
 
 Подставь свой **`https://<домен>/_presence`** вместо `BASE`, если путь другой.
 
-**Nginx:** если в ответе на **`.../_presence/online/summary`** или **`.../online/services`** пусто, а **`.../_presence/health`** работает, часто виноват **второй** `location`, начинающийся с **`/_presence/online`**: запросы к **`/online/summary`** попадают не в тот `proxy_pass`. Либо убери лишний `location`, оставь один **`location /_presence/ { proxy_pass http://127.0.0.1:8765/; }`**, либо пользуйся короткими путями **`/_presence/summary`**, **`/_presence/services`**, **`/_presence/list`** (не начинаются с `.../online/...`).
+**Nginx:** если **`.../_presence/online/summary`** пустой, а **`.../_presence/health`** ок — см. **`deploy/nginx-location-_presence.conf`** и раздел **«Nginx + Frappe»** в **`deploy/HOSTING.md`**: нужен **один** `location ^~ /_presence/` и **без** отдельного `location /_presence/online`. Пока конфиг не поправлен, используй те же односегментные пути, что и health: **`/_presence/summary`**, **`/_presence/services`**, **`/_presence/list`** (не `.../online/summary`).
 
 **Если задан `PRESENCE_X_API_TOKEN`** (или `METRICS_AUTH_TOKEN`), добавь заголовок ко всем **`GET`**:
 

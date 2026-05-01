@@ -51,6 +51,18 @@ sudo ufw allow 443/tcp
 sudo ufw enable
 ```
 
+## Nginx + Frappe: один `location` на `/_presence/`
+
+Если **`https://сайт/_presence/health`** отвечает JSON, а **`.../_presence/online/summary`** или **`.../online/services`** — **пусто**, в конфиге чаще всего есть **второй** `location` с префиксом **`/_presence/online`** (часто добавляли «только для сокета»). Тогда запросы к путям, начинающимся с `/_presence/online`, уходят **не** в тот `proxy_pass`, что health.
+
+**Как сделать «как health» для всех путей:**
+
+1. Оставь **один** блок на весь префикс с модификатором **`^~`**: см. готовый фрагмент **`deploy/nginx-location-_presence.conf`** (скопируй в `conf.d` или `include` внутри `server { }` сайта).
+2. **Удали или закомментируй** отдельные `location` вида **`/_presence/online`**, **`/_presence/online/`** — иначе ломаются URL с дополнительным сегментом (`/online/summary`).
+3. `map $http_upgrade $connection_upgrade` в **`http { }`** должен быть один раз (см. комментарий в начале `.conf`).
+
+Проверка: `curl -sS 'https://сайт/_presence/summary'` и `.../_presence/list` — тот же механизм, что `.../_presence/health`.
+
 ## 3. TLS и WebSocket (Caddy)
 
 1. Установите [Caddy](https://caddyserver.com/docs/install) на ту же машину (или отдельный reverse-proxy).
@@ -80,6 +92,7 @@ cd presence_ws && docker compose build presence-ws && docker compose up -d
 |------|------------|
 | `env.example` | Шаблон `.env` для compose |
 | `Caddyfile.example` | Пример TLS + WebSocket (Caddy) |
+| `nginx-location-_presence.conf` | **Один** `location ^~ /_presence/` для HTTP + WebSocket (как для `/health`); подключать к `server` Frappe, убрать лишние `location /_presence/online` |
 | `install-nginx-wss-devapp.sh` | **Nginx** + `wss` для **`ws.devapp.uzcloud.uz`** (Let’s Encrypt пути в скрипте); из **`presence_ws`**: `sudo bash deploy/install-nginx-wss-devapp.sh` |
 
 Подробности по API и Frappe — в **`../README.md`**.
