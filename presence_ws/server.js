@@ -575,7 +575,7 @@ function onClientMessage(ws, text) {
 	void handleCommand(ws, cmd, payload);
 }
 
-/** Локальный GET — короткие пути для nginx без конфликта с префиксом `/online` (`/_presence/summary`). */
+/** Локальный GET — короткие пути для nginx (`/_presence/overview`, без конфликта с `/online/...`). */
 function httpGetOnlineSummary(res, req) {
 	if (!assertGetAuthorized(req, res)) return;
 	let aborted = false;
@@ -845,7 +845,10 @@ const app = uWS
 				});
 			});
 	})
+	/* Компактная сводка по меткам: предпочитай /overview за nginx — путь "summary" часто режется Frappe/прокси. */
+	.get("/overview", httpGetOnlineSummary)
 	.get("/summary", httpGetOnlineSummary)
+	.get("/stats", httpGetOnlineSummary)
 	.get("/services", httpGetOnlineServices)
 	.get("/list", httpGetOnline)
 	.get("/online", httpGetOnline)

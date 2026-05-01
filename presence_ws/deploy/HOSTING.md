@@ -61,7 +61,7 @@ sudo ufw enable
 2. **Удали или закомментируй** отдельные `location` вида **`/_presence/online`**, **`/_presence/online/`** — иначе ломаются URL с дополнительным сегментом (`/online/summary`).
 3. `map $http_upgrade $connection_upgrade` в **`http { }`** должен быть один раз (см. комментарий в начале `.conf`).
 
-Проверка: `curl -sS 'https://сайт/_presence/summary'` и `.../_presence/list` — тот же механизм, что `.../_presence/health`.
+Проверка сводки (компактный JSON по меткам): `curl -sS 'https://сайт/_presence/overview'` — предпочтительный путь; при блокировке слова `summary` не используй `.../_presence/summary`. Список сессий: `.../_presence/list` — тот же upstream, что `.../_presence/health`.
 
 ## 3. TLS и WebSocket (Caddy)
 
