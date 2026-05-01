@@ -1,0 +1,11 @@
+# Example: TLS + HTTP + WebSocket to presence-ws on localhost:8765.
+# Replace presence.example.com. Caddy forwards Upgrade automatically.
+
+presence.example.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8765
+}
+
+# Docker: publish only on loopback so only Caddy reaches the port:
+# ports:
+#   - "127.0.0.1:8765:8765"

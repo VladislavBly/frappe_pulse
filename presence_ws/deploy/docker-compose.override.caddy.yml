@@ -1,0 +1,7 @@
+# Optional: merge with `cp deploy/docker-compose.override.caddy.yml docker-compose.override.yml`
+# so presence-ws listens only on loopback (Caddy on the same host uses 127.0.0.1:8765).
+
+services:
+  presence-ws:
+    ports:
+      - "127.0.0.1:${PRESENCE_WS_PORT:-8765}:8765"

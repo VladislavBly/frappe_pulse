@@ -59,6 +59,8 @@ scrape_configs:
 3. **Прокси** (Nginx / Caddy / Traefik): для WebSocket пробросьте **`Upgrade`** и **`Connection`**; **`/health`**, **`/online`**, **`/metrics`** и **`/admin/*`** ограничьте по IP/VPN, если задан **`PRESENCE_X_API_TOKEN`** — прокси должен пробрасывать заголовок к upstream (или ограничить доступ только Prometheus).
 4. **Несколько реплик:** scrape **каждую** реплику Prometheus’ом; `presence_ws_connections` при работающем Redis отражает кластер, `presence_ws_connections_local` — только эту ноду. Суммировать «local» по всем подам как «всего соединений» обычно **нельзя** (двойной счёт), ориентируйтесь на Redis-агрегат или на один срез.
 
+Пошаговый хостинг (VPS, firewall, Caddy, Frappe): **`deploy/HOSTING.md`** и примеры **`deploy/env.example`**, **`deploy/Caddyfile.example`**. Автоустановка (Docker + Caddy): **`deploy/bootstrap-host.sh`** (см. HOSTING.md §0).
+
 ---
 
 ### Проверка сессии через Frappe (`pulse_app`)
