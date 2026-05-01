@@ -232,6 +232,45 @@ function buildOnlineServicesPayload(
 	};
 }
 
+/**
+ * Компактная сводка: total + по каждой метке (массив breakdown и объект by_service).
+ * У сессий без client_service ключ в by_service: "_untagged".
+ */
+function buildOnlineSummaryPayload(
+	clientsRaw,
+	connectionsHint,
+	source,
+	redisStateStr,
+) {
+	const { tenant, service_id } = redisPresence.scope();
+	const breakdown = aggregateServiceStats(clientsRaw);
+	/** @type {Record<string, { connections: number, unique_users: number }>} */
+	const by_service = {};
+	for (const row of breakdown) {
+		const key =
+			row.client_service == null ? "_untagged" : row.client_service;
+		by_service[key] = {
+			connections: row.connections,
+			unique_users: row.unique_users,
+		};
+	}
+	const connections =
+		connectionsHint != null ? connectionsHint : clientsRaw.length;
+	const unique_users = uniqueUsersFromClientRows(clientsRaw);
+	return {
+		source,
+		tenant,
+		service_id,
+		total: {
+			connections,
+			unique_users,
+		},
+		breakdown,
+		by_service,
+		redis: redisStateStr,
+	};
+}
+
 function healthPayload() {
 	const { tenant, service_id } = redisPresence.scope();
 	const local = connectionCount();
@@ -591,6 +630,46 @@ const app = uWS
 				});
 			});
 	})
+	.get("/online/summary", (res, req) => {
+		if (!assertGetAuthorized(req, res)) return;
+		let aborted = false;
+		res.onAborted(() => {
+			aborted = true;
+		});
+		if (!redisPresence.ready()) {
+			const clientsRaw = peerList();
+			jsonHttp(
+				res,
+				buildOnlineSummaryPayload(
+					clientsRaw,
+					clientsRaw.length,
+					"local",
+					redisPresence.redisState(),
+				),
+			);
+			return;
+		}
+		Promise.all([
+			redisPresence.listOnline(),
+			redisPresence.countOnline(),
+		])
+			.then(([clientsRaw, n]) => {
+				if (aborted) return;
+				jsonHttp(
+					res,
+					buildOnlineSummaryPayload(
+						clientsRaw,
+						n ?? clientsRaw.length,
+						"redis",
+						redisPresence.redisState(),
+					),
+				);
+			})
+			.catch(() => {
+				if (aborted) return;
+				jsonHttp(res, { status: "error" }, "500 Internal Server Error");
+			});
+	})
 	.get("/online/services", (res, req) => {
 		if (!assertGetAuthorized(req, res)) return;
 		let aborted = false;
@@ -927,7 +1006,8 @@ const app = uWS
 	})
 	.any("/*", (res) => {
 		res.writeStatus("404 Not Found");
-		res.end();
+		res.writeHeader("Content-Type", "application/json; charset=utf-8");
+		res.end(JSON.stringify({ ok: false, error: "not_found" }));
 	});
 
 function shutdown(signal) {

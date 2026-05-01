@@ -1,8 +1,8 @@
 # presence-ws
 
-На одном порту: **HTTP** (`/health`, **`/metrics`** (Prometheus), **`/online`**, **`/online/services`**) и **WebSocket** на корне. Сервер — **uWebSockets.js** (npm `uwebsockets`). Образ Docker — **Debian bookworm-slim** (нативный аддон рассчитан на glibc, не Alpine).
+На одном порту: **HTTP** (`/health`, **`/metrics`** (Prometheus), **`/online/summary`**, **`/online`**, **`/online/services`**) и **WebSocket** на корне. Сервер — **uWebSockets.js** (npm `uwebsockets`). Образ Docker — **Debian bookworm-slim** (нативный аддон рассчитан на glibc, не Alpine).
 
-**Идентификатор пользователя (opaque) обязателен**, если **не** включена проверка через Frappe (см. **`FRAPPE_PRESENCE_VERIFY_*`** и флаг **`FRAPPE_PRESENCE_VERIFY_ENABLED`** ниже): его нужно передать **в query при установлении WebSocket** — в том же URL, куда клиент делает запрос **HTTP Upgrade** (`GET` с заголовком `Upgrade: websocket`). Параметры **`?user_id=...`** или **`?sub=...`** (до 512 символов). Опционально метка источника клиента: **`?client_service=...`**, или коротко **`?svc=...`**, **`?from=...`**, **`?service=...`** (до 64 символов) — попадает в события **`welcome`** / **`join`** / **`leave`** как **`client_service`**, в **`GET /online`** → **`clients`**, сводка по меткам — **`GET /online/services`** (в **`info`** → **`clients`**). Если ни одного не передали или строка пустая, сервер **не выполняет апгрейд**: ответ **HTTP 403**, до протокола WebSocket дело не доходит (ни **`welcome`**, ни событий сокета).
+**Идентификатор пользователя (opaque) обязателен**, если **не** включена проверка через Frappe (см. **`FRAPPE_PRESENCE_VERIFY_*`** и флаг **`FRAPPE_PRESENCE_VERIFY_ENABLED`** ниже): его нужно передать **в query при установлении WebSocket** — в том же URL, куда клиент делает запрос **HTTP Upgrade** (`GET` с заголовком `Upgrade: websocket`). Параметры **`?user_id=...`** или **`?sub=...`** (до 512 символов). Опционально метка источника клиента: **`?client_service=...`**, или коротко **`?svc=...`**, **`?from=...`**, **`?service=...`** (до 64 символов) — попадает в события **`welcome`** / **`join`** / **`leave`** как **`client_service`**, в **`GET /online`** → **`clients`**, компактная сводка по меткам — **`GET /online/summary`**, расширенная — **`GET /online/services`** (в **`info`** → **`clients`**). Если ни одного не передали или строка пустая, сервер **не выполняет апгрейд**: ответ **HTTP 403**, до протокола WebSocket дело не доходит (ни **`welcome`**, ни событий сокета).
 
 Несколько сокетов с **одинаковым** `user_id` считаются **одним** пользователем: в ответах **`unique_users`**, в Redis — SET `uniq` + refcount.
 
@@ -166,11 +166,61 @@ curl -sS -X POST "http://127.0.0.1:8765/admin/kick" \
 ### Быстрый онлайн по HTTP (документация / мониторинг)
 
 - **`GET /health`** — `connections` (все сокеты), **`unique_users`**, `connections_local`, `redis`, …
+- **`GET /online/summary`** — компактно: **`total`** (`connections`, `unique_users` по всем), **`breakdown`** — массив объектов `{ client_service, connections, unique_users }` по каждой метке (`client_service: null` — без метки), и **`by_service`** — то же по ключам меток; для сессий без **`client_service`** ключ **`_untagged`**.
 - **`GET /online/services`** — только справочник меток и сводка по ним: **`services`**, **`service_stats`** (по каждой метке и «без метки»), плюс глобальные **`connections`** и **`unique_users`** по всем сессиям. Без массива **`clients`**.
 - **`GET /online`** — массив **`clients`** и те же глобальные счётчики (или при фильтре — только выбранная метка). Фильтр: **`?client_service=edoc`** или **`?svc=edoc`**; только без метки: **`?client_service=__none__`**. В ответе при фильтре поле **`filter`**.
 
+### Примеры `curl`: метки, полный онлайн, фильтр по сервису
+
+**Локально** (прямой доступ к порту presence-ws, по умолчанию **`8765`**):
+
+```bash
+# Компактная сводка: total + breakdown[] + by_service{}
+curl -sS http://127.0.0.1:8765/online/summary
+
+# Список меток (`services`) и сводка по каждой (`service_stats`), без массива clients
+curl -sS http://127.0.0.1:8765/online/services
+
+# Все сессии и глобальные connections / unique_users
+curl -sS http://127.0.0.1:8765/online
+
+# Только сессии с меткой client_service=edoc (счётчики и clients по этой метке)
+curl -sS 'http://127.0.0.1:8765/online?client_service=edoc'
+curl -sS 'http://127.0.0.1:8765/online?svc=edoc'
+
+# Только сессии без метки client_service
+curl -sS 'http://127.0.0.1:8765/online?client_service=__none__'
+```
+
+**За reverse proxy** (nginx режет префикс и шлёт на тот же upstream; пример пути **`/_presence/`** на сайте Frappe):
+
+```bash
+BASE='https://devapp.uzcloud.uz/_presence'
+
+curl -sS "${BASE}/online/summary"
+curl -sS "${BASE}/online/services"
+curl -sS "${BASE}/online"
+curl -sS "${BASE}/online?client_service=edoc"
+curl -sS "${BASE}/online?client_service=__none__"
+```
+
+Подставь свой **`https://<домен>/_presence`** вместо `BASE`, если путь другой.
+
+**Если задан `PRESENCE_X_API_TOKEN`** (или `METRICS_AUTH_TOKEN`), добавь заголовок ко всем **`GET`**:
+
+```bash
+curl -sS -H "X-Api-Token: $PRESENCE_X_API_TOKEN" http://127.0.0.1:8765/online/summary
+curl -sS -H "X-Api-Token: $PRESENCE_X_API_TOKEN" http://127.0.0.1:8765/online/services
+curl -sS -H "Authorization: Bearer $PRESENCE_X_API_TOKEN" 'https://devapp.uzcloud.uz/_presence/online'
+```
+
+(переменная **`BASE`** — из блока «За reverse proxy» выше; для одной команды можно подставить полный URL к **`/online`** или **`/online/services`**).
+
+Кратко (то же самое одной строкой для копирования):
+
 ```bash
 curl -s http://127.0.0.1:8765/health
+curl -s http://127.0.0.1:8765/online/summary
 curl -s http://127.0.0.1:8765/online/services
 curl -s http://127.0.0.1:8765/online
 curl -s 'http://127.0.0.1:8765/online?client_service=edoc'
@@ -179,10 +229,11 @@ curl -s 'http://127.0.0.1:8765/online?client_service=edoc'
 
 ### Статистика без `docker exec`
 
-Если порт **8765** с контейнера проброшен на хост (как в `docker-compose`), достаточно **любой** HTTP-клиент с **той машины**:
+Если порт **8765** с контейнера проброшен на хост (как в `docker-compose`), достаточно **любой** HTTP-клиент с **той машины** — те же URL, что в блоке **«Примеры curl»** выше:
 
 ```bash
 curl -s http://127.0.0.1:8765/health
+curl -s http://127.0.0.1:8765/online/summary
 curl -s http://127.0.0.1:8765/online/services
 curl -s http://127.0.0.1:8765/online
 curl -s 'http://127.0.0.1:8765/online?client_service=edoc'
