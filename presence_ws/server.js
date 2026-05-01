@@ -1,23 +1,24 @@
 "use strict";
 
 const crypto = require("crypto");
-const http = require("http");
-const { WebSocketServer, WebSocket } = require("ws");
+const uWS = require("uwebsockets");
 const redisPresence = require("./redis-presence");
+const frappeVerify = require("./frappe-verify");
 
 const PORT = Number.parseInt(process.env.PORT || "8765", 10);
 const HOST = process.env.HOST || "0.0.0.0";
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 const startedAt = Date.now();
 
-/** @type {Map<string, { ws: import('ws'), connectedAt: number, address: string, userKey: string }>} */
+/** @type {Map<string, { ws: object, connectedAt: number, address: string, userKey: string }>} */
 const clientsById = new Map();
+
+let listenSocket = null;
 
 function connectionCount() {
 	return clientsById.size;
 }
 
-/** Сколько разных user_id среди локальных сокетов (без Redis). */
 function uniqueLocalCount() {
 	const keys = new Set();
 	for (const meta of clientsById.values()) {
@@ -26,16 +27,29 @@ function uniqueLocalCount() {
 	return keys.size;
 }
 
-/** Обязателен query `user_id` или `sub` (непустая строка). Иначе соединение закрывается. */
-function parseRequiredUserId(req) {
+function parseQueryUserId(req) {
+	const raw = req.getQuery("user_id") || req.getQuery("sub");
+	if (raw && String(raw).trim()) return String(raw).trim().slice(0, 512);
+	return null;
+}
+
+function remoteAddressText(req) {
 	try {
-		const u = new URL(req.url || "/", "http://localhost");
-		const raw = u.searchParams.get("user_id") || u.searchParams.get("sub");
-		if (raw && raw.trim()) return raw.trim().slice(0, 512);
+		const t = req.getRemoteAddressAsText();
+		if (t) {
+			if (typeof t === "string") return t;
+			const s = Buffer.from(t).toString("utf8");
+			if (s) return s;
+		}
+		const bin = req.getRemoteAddress();
+		if (bin && bin.byteLength === 4) {
+			const u = new Uint8Array(bin);
+			return `${u[0]}.${u[1]}.${u[2]}.${u[3]}`;
+		}
 	} catch {
 		/* */
 	}
-	return null;
+	return "?";
 }
 
 function peerList() {
@@ -54,18 +68,16 @@ function peerList() {
 
 function healthPayload() {
 	const { tenant, service_id } = redisPresence.scope();
-	const redis = redisPresence.redisState();
 	const local = connectionCount();
-	const base = {
+	return {
 		status: "ok",
 		service: "presence-ws",
 		connections: local,
 		tenant,
 		service_id,
-		redis,
+		redis: redisPresence.redisState(),
 		connections_local: local,
 	};
-	return base;
 }
 
 async function healthPayloadAsync() {
@@ -81,64 +93,122 @@ async function healthPayloadAsync() {
 	return payload;
 }
 
-const server = http.createServer(async (req, res) => {
-	if (req.url === "/health" && req.method === "GET") {
-		res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-		res.end(JSON.stringify(await healthPayloadAsync()));
-		return;
+function jsonHttp(res, obj, status = "200 OK") {
+	res.writeStatus(status);
+	res.writeHeader("Content-Type", "application/json; charset=utf-8");
+	res.end(JSON.stringify(obj));
+}
+
+function parseAdminToken(req) {
+	const bearer = (req.getHeader("authorization") || "").trim();
+	const m = /^Bearer\s+(.+)$/i.exec(bearer);
+	if (m) return m[1].trim();
+	return (req.getHeader("x-admin-token") || "").trim();
+}
+
+/** Read small JSON POST body (uWebSockets: req invalid after return). */
+function readJsonBody(res, maxBytes, onJson, onFail) {
+	let buffer;
+	let total = 0;
+	let settled = false;
+	function fail(err) {
+		if (settled) return;
+		settled = true;
+		onFail(err);
 	}
-	if (req.url === "/online" && req.method === "GET") {
-		res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-		const { tenant, service_id } = redisPresence.scope();
-		if (!redisPresence.ready()) {
-			res.end(
-				JSON.stringify({
-					source: "local",
-					tenant,
-					service_id,
-					connections: connectionCount(),
-					unique_users: uniqueLocalCount(),
-					clients: peerList(),
-					redis: redisPresence.redisState(),
-				}),
-			);
+	res.onAborted(() => fail(new Error("aborted")));
+	res.onData((ab, isLast) => {
+		if (settled) return;
+		const chunk = Buffer.from(ab);
+		total += chunk.length;
+		if (total > maxBytes) {
+			fail(new Error("too_large"));
 			return;
 		}
-		const clients = await redisPresence.listOnline();
-		const n = await redisPresence.countOnline();
-		const uq = await redisPresence.countUniqueUsers();
-		res.end(
-			JSON.stringify({
-				source: "redis",
-				tenant,
-				service_id,
-				connections: n ?? clients.length,
-				unique_users: uq ?? 0,
-				clients,
-				redis: redisPresence.redisState(),
-			}),
-		);
-		return;
-	}
-	res.writeHead(404);
-	res.end();
-});
-
-const wss = new WebSocketServer({ server });
-
-function broadcastExcept(payload, exceptWs) {
-	const data = JSON.stringify(payload);
-	for (const client of wss.clients) {
-		if (client === exceptWs) continue;
-		if (client.readyState === WebSocket.OPEN) {
-			client.send(data);
+		if (isLast) {
+			const raw = buffer ? Buffer.concat([buffer, chunk]) : chunk;
+			const text = raw.length ? raw.toString("utf8").trim() : "{}";
+			try {
+				const obj = JSON.parse(text || "{}");
+				if (settled) return;
+				settled = true;
+				onJson(obj);
+			} catch (e) {
+				fail(e);
+			}
+		} else {
+			buffer = buffer ? Buffer.concat([buffer, chunk]) : Buffer.from(chunk);
 		}
+	});
+}
+
+function kickSessionById(sessionId) {
+	const meta = clientsById.get(sessionId);
+	if (!meta) return { ok: false, notFound: true };
+	try {
+		sendWsJson(meta.ws, { event: "bye", reason: "kick" });
+		meta.ws.end(1000, "kick");
+	} catch {
+		return { ok: false, error: "close_failed" };
+	}
+	return { ok: true };
+}
+
+function kickAllSessions() {
+	let n = 0;
+	for (const meta of Array.from(clientsById.values())) {
+		try {
+			sendWsJson(meta.ws, { event: "bye", reason: "kickAll" });
+			meta.ws.end(1000, "kickAll");
+			n++;
+		} catch {
+			/* */
+		}
+	}
+	return n;
+}
+
+function assertAdminHttp(req, res) {
+	if (!ADMIN_TOKEN) {
+		res.cork(() =>
+			jsonHttp(
+				res,
+				{ ok: false, error: "admin_disabled" },
+				"503 Service Unavailable",
+			),
+		);
+		return false;
+	}
+	if (parseAdminToken(req) !== ADMIN_TOKEN) {
+		res.cork(() =>
+			jsonHttp(res, { ok: false, error: "forbidden" }, "403 Forbidden"),
+		);
+		return false;
+	}
+	return true;
+}
+
+function sendWsJson(ws, obj) {
+	try {
+		ws.send(JSON.stringify(obj), false);
+	} catch {
+		/* */
 	}
 }
 
 function sendError(ws, message) {
-	if (ws.readyState === WebSocket.OPEN) {
-		ws.send(JSON.stringify({ event: "error", message }));
+	sendWsJson(ws, { event: "error", message });
+}
+
+function broadcastExcept(exceptWs, payload) {
+	const data = JSON.stringify(payload);
+	for (const meta of clientsById.values()) {
+		if (meta.ws === exceptWs) continue;
+		try {
+			meta.ws.send(data, false);
+		} catch {
+			/* */
+		}
 	}
 }
 
@@ -161,18 +231,16 @@ async function handleCommand(ws, cmdRaw, payload) {
 			connections = connectionCount();
 			unique_users = uniqueLocalCount();
 		}
-		ws.send(
-			JSON.stringify({
-				event: "info",
-				service: "presence-ws",
-				alive: true,
-				connections,
-				unique_users,
-				uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
-				clients,
-				redis: redisPresence.redisState(),
-			}),
-		);
+		sendWsJson(ws, {
+			event: "info",
+			service: "presence-ws",
+			alive: true,
+			connections,
+			unique_users,
+			uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
+			clients,
+			redis: redisPresence.redisState(),
+		});
 		return;
 	}
 
@@ -188,89 +256,53 @@ async function handleCommand(ws, cmdRaw, payload) {
 			connections = connectionCount();
 			unique_users = uniqueLocalCount();
 		}
-		ws.send(
-			JSON.stringify({
-				event: "stats",
-				alive: true,
-				connections,
-				unique_users,
-				uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
-				redis: redisPresence.redisState(),
-			}),
+		sendWsJson(ws, {
+			event: "stats",
+			alive: true,
+			connections,
+			unique_users,
+			uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
+			redis: redisPresence.redisState(),
+		});
+		return;
+	}
+
+	const adminish =
+		cmd === "kick" ||
+		cmd === "kickall" ||
+		cmd === "kick_all";
+	if (adminish) {
+		sendError(
+			ws,
+			"admin: use HTTP POST /admin/kick or /admin/kick-all (header X-Admin-Token or Authorization: Bearer)",
 		);
 		return;
 	}
+}
 
-	const isKick = cmd === "kick" || cmd === "kickall" || cmd === "kick_all";
-	if (!isKick) {
-		return;
-	}
+function copyWsUpgradeHeaders(req) {
+	return {
+		secWebSocketKey: req.getHeader("sec-websocket-key"),
+		secWebSocketProtocol: req.getHeader("sec-websocket-protocol"),
+		secWebSocketExtensions: req.getHeader("sec-websocket-extensions"),
+	};
+}
 
-	if (!ADMIN_TOKEN) {
-		sendError(ws, "kick disabled: set ADMIN_TOKEN on server");
-		return;
-	}
-
-	const token = payload && (payload.token || payload.secret);
-	if (token !== ADMIN_TOKEN) {
-		sendError(ws, "forbidden");
-		return;
-	}
-
-	const kickAll =
-		cmd === "kickall" ||
-		cmd === "kick_all" ||
-		(payload && (payload.all === true || payload.all === "all"));
-
-	if (kickAll) {
-		for (const meta of Array.from(clientsById.values())) {
-			try {
-				if (meta.ws.readyState === WebSocket.OPEN) {
-					meta.ws.send(JSON.stringify({ event: "bye", reason: "kickAll" }));
-					meta.ws.close();
-				}
-			} catch {
-				/* */
-			}
-		}
-		return;
-	}
-
-	const targetId =
-		payload &&
-		(payload.session_id ||
-			payload.id ||
-			payload.target ||
-			payload.clientId);
-	if (!targetId || typeof targetId !== "string") {
-		sendError(ws, "kick: need session_id");
-		return;
-	}
-
-	const meta = clientsById.get(targetId);
-	if (!meta) {
-		sendError(ws, "kick: client not found");
-		return;
-	}
-
-	try {
-		if (meta.ws.readyState === WebSocket.OPEN) {
-			meta.ws.send(JSON.stringify({ event: "bye", reason: "kick" }));
-			meta.ws.close();
-		}
-		if (ws.readyState === WebSocket.OPEN) {
-			ws.send(
-				JSON.stringify({
-					event: "kicked",
-					session_id: targetId,
-					id: targetId,
-					clientId: targetId,
-				}),
-			);
-		}
-	} catch {
-		sendError(ws, "kick failed");
-	}
+function commitWsUpgrade(res, context, userKey, headers, address) {
+	const sessionId = crypto.randomUUID();
+	const connectedAt = Date.now();
+	res.upgrade(
+		{
+			sessionId,
+			userKey,
+			address,
+			connectedAt,
+		},
+		headers.secWebSocketKey,
+		headers.secWebSocketProtocol,
+		headers.secWebSocketExtensions,
+		context,
+	);
 }
 
 function onClientMessage(ws, text) {
@@ -278,11 +310,11 @@ function onClientMessage(ws, text) {
 	if (!trimmed) return;
 
 	if (/^info$/i.test(trimmed)) {
-		handleCommand(ws, "info", {});
+		void handleCommand(ws, "info", {});
 		return;
 	}
 	if (/^stats$/i.test(trimmed)) {
-		handleCommand(ws, "stats", {});
+		void handleCommand(ws, "stats", {});
 		return;
 	}
 
@@ -297,82 +329,310 @@ function onClientMessage(ws, text) {
 
 	const cmd = payload.cmd || payload.command;
 	if (cmd === undefined && payload.action) {
-		handleCommand(ws, payload.action, payload);
+		void handleCommand(ws, payload.action, payload);
 		return;
 	}
-	handleCommand(ws, cmd, payload);
+	void handleCommand(ws, cmd, payload);
 }
 
-wss.on("connection", (ws, req) => {
-	const address = `${req.socket.remoteAddress || "?"}`;
-	const userKey = parseRequiredUserId(req);
-	if (!userKey) {
-		console.log("REJECT", address, "missing user_id or sub");
-		ws.close(1008, "user_id or sub query parameter required");
-		return;
-	}
-
-	const sessionId = crypto.randomUUID();
-	const connectedAt = Date.now();
-	clientsById.set(sessionId, { ws, connectedAt, address, userKey });
-	ws.sessionId = sessionId;
-
-	console.log("CONNECT", address, sessionId, userKey, "total", connectionCount());
-
-	redisPresence
-		.recordConnect(sessionId, {
-			connectedAt,
-			address,
-			user_id: userKey,
-		})
-		.catch((e) => console.error("redis recordConnect", e.message));
-
-	/* Сессия = уникальный UUID на каждое подключение; user_id — opaque пользователя */
-	ws.send(
-		JSON.stringify({
-			event: "welcome",
-			message: "presence-ws",
-			session_id: sessionId,
-			clientId: sessionId,
-			user_id: userKey,
-		}),
-	);
-
-	broadcastExcept(
-		{ event: "join", session_id: sessionId, clientId: sessionId, user_id: userKey },
-		ws,
-	);
-
-	ws.on("message", (data, isBinary) => {
-		if (isBinary) return;
-		onClientMessage(ws, data.toString());
-	});
-
-	ws.on("close", () => {
-		const sid = ws.sessionId;
-		const meta = clientsById.get(sid);
-		const uk = meta?.userKey ?? `anon:${sid}`;
-		clientsById.delete(sid);
-		redisPresence.recordDisconnect(sid).catch((e) => console.error("redis recordDisconnect", e.message));
-		broadcastExcept(
-			{ event: "leave", session_id: sid, clientId: sid, user_id: uk },
-			ws,
+const app = uWS
+	.App()
+	.get("/health", (res) => {
+		let aborted = false;
+		res.onAborted(() => {
+			aborted = true;
+		});
+		healthPayloadAsync()
+			.then((payload) => {
+				if (aborted) return;
+				jsonHttp(res, payload);
+			})
+			.catch(() => {
+				if (aborted) return;
+				jsonHttp(res, { status: "error" }, "500 Internal Server Error");
+			});
+	})
+	.get("/online", (res) => {
+		let aborted = false;
+		res.onAborted(() => {
+			aborted = true;
+		});
+		const { tenant, service_id } = redisPresence.scope();
+		if (!redisPresence.ready()) {
+			jsonHttp(res, {
+				source: "local",
+				tenant,
+				service_id,
+				connections: connectionCount(),
+				unique_users: uniqueLocalCount(),
+				clients: peerList(),
+				redis: redisPresence.redisState(),
+			});
+			return;
+		}
+		Promise.all([
+			redisPresence.listOnline(),
+			redisPresence.countOnline(),
+			redisPresence.countUniqueUsers(),
+		])
+			.then(([clients, n, uq]) => {
+				if (aborted) return;
+				jsonHttp(res, {
+					source: "redis",
+					tenant,
+					service_id,
+					connections: n ?? clients.length,
+					unique_users: uq ?? 0,
+					clients,
+					redis: redisPresence.redisState(),
+				});
+			})
+			.catch(() => {
+				if (aborted) return;
+				jsonHttp(res, { status: "error" }, "500 Internal Server Error");
+			});
+	})
+	.post("/admin/kick", (res, req) => {
+		if (!assertAdminHttp(req, res)) return;
+		readJsonBody(
+			res,
+			8192,
+			(obj) => {
+				const sid =
+					obj &&
+					(obj.session_id || obj.id || obj.clientId || obj.target);
+				if (!sid || typeof sid !== "string") {
+					res.cork(() =>
+						jsonHttp(
+							res,
+							{ ok: false, error: "session_id required" },
+							"400 Bad Request",
+						),
+					);
+					return;
+				}
+				const id = sid.trim();
+				const r = kickSessionById(id);
+				if (r.notFound) {
+					res.cork(() =>
+						jsonHttp(
+							res,
+							{ ok: false, error: "not_found", session_id: id },
+							"404 Not Found",
+						),
+					);
+					return;
+				}
+				if (!r.ok) {
+					res.cork(() =>
+						jsonHttp(
+							res,
+							{ ok: false, error: r.error || "kick_failed" },
+							"500 Internal Server Error",
+						),
+					);
+					return;
+				}
+				res.cork(() => jsonHttp(res, { ok: true, session_id: id }));
+			},
+			(err) => {
+				if (err && err.message === "aborted") return;
+				const status =
+					err && err.message === "too_large"
+						? "413 Payload Too Large"
+						: "400 Bad Request";
+				const code =
+					err && err.message === "too_large" ? "too_large" : "invalid_json";
+				res.cork(() =>
+					jsonHttp(res, { ok: false, error: code }, status),
+				);
+			},
 		);
-		console.log("DISCONNECT", address, sid, uk, "total", connectionCount());
-	});
+	})
+	.post("/admin/kick-all", (res, req) => {
+		if (!assertAdminHttp(req, res)) return;
+		const cl = Number.parseInt(req.getHeader("content-length") || "0", 10);
+		if (!cl || cl <= 0) {
+			const n = kickAllSessions();
+			res.cork(() => jsonHttp(res, { ok: true, disconnected: n }));
+			return;
+		}
+		readJsonBody(
+			res,
+			256,
+			() => {
+				const n = kickAllSessions();
+				res.cork(() => jsonHttp(res, { ok: true, disconnected: n }));
+			},
+			(err) => {
+				if (err && err.message === "aborted") return;
+				const status =
+					err && err.message === "too_large"
+						? "413 Payload Too Large"
+						: "400 Bad Request";
+				const code =
+					err && err.message === "too_large" ? "too_large" : "invalid_json";
+				res.cork(() =>
+					jsonHttp(res, { ok: false, error: code }, status),
+				);
+			},
+		);
+	})
+	.ws("/*", {
+		compression: uWS.SHARED_COMPRESSOR,
+		maxPayloadLength: 64 * 1024,
+		idleTimeout: 120,
+		upgrade: (res, req, context) => {
+			const headers = copyWsUpgradeHeaders(req);
+			const address = remoteAddressText(req);
 
-	ws.on("error", (err) => {
-		console.error("ws error", address, err.message);
+			if (!frappeVerify.isEnabled()) {
+				const userKey = parseQueryUserId(req);
+				if (!userKey) {
+					console.log(
+						"REJECT",
+						address,
+						"missing user_id or sub",
+					);
+					res.writeStatus("403 Forbidden");
+					res.end("user_id or sub query parameter required");
+					return;
+				}
+				commitWsUpgrade(res, context, userKey, headers, address);
+				return;
+			}
+
+			const ticket = (req.getQuery("ticket") || "").trim().slice(0, 200);
+			const sidFromQuery = (req.getQuery("sid") || "").trim().slice(0, 128);
+			const cookie = req.getHeader("cookie") || "";
+			const sid =
+				sidFromQuery || frappeVerify.parseSidFromCookie(cookie) || "";
+
+			let aborted = false;
+			res.onAborted(() => {
+				aborted = true;
+			});
+
+			frappeVerify
+				.verifyUpgrade({ sid, ticket })
+				.then((result) => {
+					if (aborted) return;
+					if (!result.ok) {
+						res.cork(() => {
+							if (aborted) return;
+							res.writeStatus(result.status);
+							res.end(result.body);
+						});
+						return;
+					}
+					res.cork(() => {
+						if (aborted) return;
+						commitWsUpgrade(
+							res,
+							context,
+							result.userKey,
+							headers,
+							address,
+						);
+					});
+				})
+				.catch(() => {
+					if (aborted) return;
+					res.cork(() => {
+						if (aborted) return;
+						res.writeStatus("502 Bad Gateway");
+						res.end("Frappe verify error");
+					});
+				});
+		},
+		open: (ws) => {
+			const d = ws.getUserData();
+			const sessionId = d.sessionId;
+			const userKey = d.userKey;
+			const address = d.address;
+			const connectedAt = d.connectedAt;
+
+			clientsById.set(sessionId, {
+				ws,
+				connectedAt,
+				address,
+				userKey,
+			});
+
+			console.log(
+				"CONNECT",
+				address,
+				sessionId,
+				userKey,
+				"total",
+				connectionCount(),
+			);
+
+			redisPresence
+				.recordConnect(sessionId, {
+					connectedAt,
+					address,
+					user_id: userKey,
+				})
+				.catch((e) => console.error("redis recordConnect", e.message));
+
+			sendWsJson(ws, {
+				event: "welcome",
+				message: "presence-ws",
+				session_id: sessionId,
+				clientId: sessionId,
+				user_id: userKey,
+			});
+
+			broadcastExcept(ws, {
+				event: "join",
+				session_id: sessionId,
+				clientId: sessionId,
+				user_id: userKey,
+			});
+		},
+		message: (ws, message, isBinary) => {
+			if (isBinary) return;
+			const text = Buffer.from(message).toString("utf8");
+			onClientMessage(ws, text);
+		},
+		close: (ws) => {
+			const d = ws.getUserData();
+			const sid = d.sessionId;
+			const uk = d.userKey;
+			const address = d.address;
+			clientsById.delete(sid);
+			redisPresence
+				.recordDisconnect(sid)
+				.catch((e) => console.error("redis recordDisconnect", e.message));
+			broadcastExcept(ws, {
+				event: "leave",
+				session_id: sid,
+				clientId: sid,
+				user_id: uk,
+			});
+			console.log(
+				"DISCONNECT",
+				address,
+				sid,
+				uk,
+				"total",
+				connectionCount(),
+			);
+		},
+	})
+	.any("/*", (res) => {
+		res.writeStatus("404 Not Found");
+		res.end();
 	});
-});
 
 function shutdown(signal) {
 	console.log(signal, "shutting down");
-	wss.close(() => {
-		redisPresence.quit().finally(() => {
-			server.close(() => process.exit(0));
-		});
-	});
+	if (listenSocket) {
+		uWS.us_listen_socket_close(listenSocket);
+		listenSocket = null;
+	}
+	redisPresence.quit().finally(() => process.exit(0));
 	setTimeout(() => process.exit(1), 10_000).unref();
 }
 
@@ -386,10 +646,17 @@ process.on("SIGINT", () => shutdown("SIGINT"));
 		console.error(e);
 		process.exit(1);
 	}
-	server.listen(PORT, HOST, () => {
+
+	app.listen(HOST, PORT, (token) => {
+		listenSocket = token;
+		if (!token) {
+			console.error("failed to listen");
+			process.exit(1);
+			return;
+		}
 		const rs = redisPresence.redisState();
 		console.log(
-			`presence-ws http+ws http://${HOST}:${PORT} health=/health online=/online redis=${rs} kick=${ADMIN_TOKEN ? "on" : "off"}`,
+			`presence-ws uWebSockets.js http://${HOST}:${PORT} health=/health online=/online admin_http=${ADMIN_TOKEN ? "on" : "off"} redis=${rs} frappe_verify=${frappeVerify.isEnabled() ? "on" : "off"}`,
 		);
 	});
 })();

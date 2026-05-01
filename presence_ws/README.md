@@ -1,8 +1,10 @@
 # presence-ws
 
-На одном порту: **HTTP** (`/health`, **`/online`**) и **WebSocket** на корне. Порт по умолчанию **8765** (`PORT` в окружении).
+На одном порту: **HTTP** (`/health`, **`/online`**) и **WebSocket** на корне. Сервер — **uWebSockets.js** (npm `uwebsockets`). Образ Docker — **Debian bookworm-slim** (нативный аддон рассчитан на glibc, не Alpine).
 
-**Идентификатор пользователя (opaque) обязателен:** в URL сокета должен быть **`?user_id=...`** или **`?sub=...`** (строка до 512 символов). Без этого параметра сервер **сразу закрывает** соединение (код **1008**). Несколько сокетов с **одинаковым** `user_id` считаются **одним** пользователем: в ответах **`unique_users`**, в Redis — SET `uniq` + refcount.
+**Идентификатор пользователя (opaque) обязателен**, если **не** включена проверка через Frappe (см. таблицу **`FRAPPE_PRESENCE_VERIFY_*`** ниже): его нужно передать **в query при установлении WebSocket** — в том же URL, куда клиент делает запрос **HTTP Upgrade** (`GET` с заголовком `Upgrade: websocket`). Параметры **`?user_id=...`** или **`?sub=...`** (до 512 символов). Если ни одного не передали или строка пустая, сервер **не выполняет апгрейд**: ответ **HTTP 403**, до протокола WebSocket дело не доходит (ни **`welcome`**, ни событий сокета).
+
+Несколько сокетов с **одинаковым** `user_id` считаются **одним** пользователем: в ответах **`unique_users`**, в Redis — SET `uniq` + refcount.
 
 **Redis:** сессии в **HASH** `sessions`, уникальные `user_id` в **SET** `uniq`, refcount в **HASH** `ref` (см. ключи с hash-tag в `redis-presence.js`). **`GET /health`** и **`GET /online`** возвращают **`connections`** (все сокеты) и **`unique_users`** (разные `user_id`).
 
@@ -17,6 +19,41 @@
 | **`PRESENCE_TENANT`** | Префикс логического tenant (по умолчанию `default`). |
 | **`PRESENCE_SERVICE_ID`** | Идентификатор сервиса (по умолчанию `presence-ws`). |
 | **`NODE_INSTANCE_ID`** | Метка ноды в JSON сессии в Redis (по умолчанию `HOSTNAME` или `node`). |
+| **`FRAPPE_PRESENCE_VERIFY_URL`** | **POST** на Frappe, например `http://backend:8000/api/pulse/internal/presence-ws-upgrade-verify`. Задаётся **вместе** с **`FRAPPE_PRESENCE_VERIFY_SECRET`** — тогда WebSocket **не** принимает произвольный `user_id` из query: идентификатор берётся только после ответа Frappe. |
+| **`FRAPPE_PRESENCE_VERIFY_SECRET`** | Совпадает с **`pulse_presence_auth_secret`** в `site_config.json` сайта Frappe (заголовок **`X-Pulse-Presence-Secret`**). |
+| **`FRAPPE_PRESENCE_VERIFY_TIMEOUT_MS`** | Таймаут запроса к Frappe при Upgrade (по умолчанию **5000**). |
+
+### Проверка сессии через Frappe (`pulse_app`)
+
+1. В **`site_config.json`** сайта Frappe задайте общий секрет (тот же, что в **`FRAPPE_PRESENCE_VERIFY_SECRET`** у presence-ws):
+
+   ```json
+   "pulse_presence_auth_secret": "длинная-случайная-строка"
+   ```
+
+   Опционально TTL одноразового билета (секунды, по умолчанию 120, макс. 600):
+
+   ```json
+   "pulse_presence_ticket_ttl": 120
+   ```
+
+2. **Внутренний** эндпоинт (вызывает только **presence-ws**, не браузер): **`POST /api/pulse/internal/presence-ws-upgrade-verify`**  
+   Заголовки: **`Content-Type: application/json`**, **`X-Pulse-Presence-Secret`**.  
+   Тело: **`{"ticket":"<от ws-ticket>"}`** и/или **`{"sid":"<Frappe session id>"}`**.  
+   Приоритет: сначала **ticket** (одноразовый), иначе **sid** (строка сессии из `tabSessions`).  
+   Ответ **`200`**: `{"data":{"user_id":"<имя пользователя Frappe>"}}` — это значение уходит в **`user_id`** в событиях присутствия.
+
+3. **Билет для браузера** (пользователь уже залогинен в Frappe, обычный **`POST`** с CSRF, как у остальных запросов Desk): **`POST /api/pulse/presence/ws-ticket`**  
+   Ответ: `{"data":{"ticket":"...","expires_in":120}}`.  
+   Дальше WebSocket (при включённой проверке):
+
+   ```text
+   ws://<presence-host>:8765/?ticket=<ticket>
+   ```
+
+   Параметр **`sid`** в query или cookie **`sid`** на том же хосте, что и presence, имеет смысл в основном при **прокси с одним origin** (чтобы браузер прислал cookie на тот же хост, куда уходит Upgrade).
+
+4. Пока **`FRAPPE_PRESENCE_VERIFY_URL` / `FRAPPE_PRESENCE_VERIFY_SECRET`** **не** заданы, поведение как раньше: в query обязательны **`user_id`** или **`sub`** (без проверки Frappe).
 
 ---
 
@@ -28,20 +65,57 @@
 npx wscat -c "ws://127.0.0.1:8765/?user_id=u-opaque-123"
 ```
 
-Без **`user_id` / `sub`** подключение будет **отклонено**. **`welcome`**: **`session_id`**, **`clientId`**, **`user_id`**; остальным **`join`** / **`leave`**: то же.
+#### Fedora / Linux: `websocat` через Cargo
 
-### Команды по WebSocket (info / stats / kick)
+В репозиториях Fedora пакета `websocat` может не быть — соберите из crates.io:
 
-Отправьте **текст или JSON** в открытый сокет:
+```bash
+sudo dnf install cargo
+cargo install websocat
+```
+
+Бинарник обычно в **`~/.cargo/bin/websocat`**. Добавьте в `PATH`, если нужно: `export PATH="$HOME/.cargo/bin:$PATH"` (или постоянно в `~/.bashrc`).
+
+Подключение (хост/порт и `user_id` подставьте свои):
+
+```bash
+~/.cargo/bin/websocat 'ws://127.0.0.1:8765/?user_id=u-opaque-123'
+```
+
+Без **`user_id` / `sub`** на этапе Upgrade клиент получит **403** и WebSocket не откроется. После успешного апгрейда приходит **`welcome`** с **`session_id`**, **`clientId`**, **`user_id`**; остальным **`join`** / **`leave`**: то же.
+
+### Команды по WebSocket (только info / stats)
+
+Отправьте **текст или JSON** в открытый сокет (без админского секрета — его **нельзя** слать в общий WS-канал):
 
 | Действие | Пример | Ответ |
 |----------|--------|--------|
 | Жив ли сервис, список сессий | текст `info` или `{"cmd":"info"}` | **`clients`**: **`session_id`**, **`user_id`**, … |
 | Короткая сводка | текст `stats` или `{"cmd":"stats"}` | `connections`, **`unique_users`**, `uptimeSec`, `alive` |
-| Выгнать сессию по UUID | `{"cmd":"kick","session_id":"<uuid>","token":"..."}` (или `id` / `clientId`) | у цели `bye`, вам `kicked` с **`session_id`** |
-| Отключить **всех** | `{"cmd":"kickAll","token":"<ADMIN_TOKEN>"}` или `{"cmd":"kick","all":true,"token":"..."}` | всем `bye` с `kickAll` |
 
-Без переменной **`ADMIN_TOKEN`** команды **kick** отклоняются (`error`: kick disabled). Задайте секрет в окружении сервера и перезапустите контейнер.
+Попытки **kick** по сокету получают подсказку перейти на **HTTP** (см. ниже).
+
+### Админ: kick только по HTTP
+
+Секрет задаётся переменной **`ADMIN_TOKEN`** на сервере. Передавайте его **только** в заголовке (не в query, не в WebSocket):
+
+- **`X-Admin-Token: <ADMIN_TOKEN>`** или **`Authorization: Bearer <ADMIN_TOKEN>`**
+
+| Действие | HTTP | Тело (JSON) |
+|----------|------|-------------|
+| Выгнать одну сессию | **`POST /admin/kick`** | `{"session_id":"<uuid>"}` (допустимы поля `id` / `clientId` / `target`) |
+| Отключить всех | **`POST /admin/kick-all`** | Тело не обязательно (`Content-Length: 0` или `{}`) |
+
+Ответы: **`200`** `{"ok":true,"session_id":"..."}` или `{"ok":true,"disconnected":N}`; **`403`** при неверном токене; **`503`** если **`ADMIN_TOKEN`** не задан.
+
+Пример:
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8765/admin/kick" \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -d '{"session_id":"<uuid>"}'
+```
 
 ---
 

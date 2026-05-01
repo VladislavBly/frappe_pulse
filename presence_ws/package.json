@@ -2,7 +2,7 @@
 	"name": "presence-ws",
 	"version": "0.1.0",
 	"private": true,
-	"description": "Minimal WebSocket server for presence / realtime (Docker-ready)",
+	"description": "Presence WebSocket service (uWebSockets.js + Redis + HTTP)",
 	"main": "server.js",
 	"scripts": {
 		"start": "node server.js",
@@ -15,6 +15,7 @@
 	},
 	"dependencies": {
 		"redis": "^4.7.0",
+		"uwebsockets": "^3.0.5",
 		"ws": "^8.18.0"
 	}
 }

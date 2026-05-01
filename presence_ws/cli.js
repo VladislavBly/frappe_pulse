@@ -87,6 +87,8 @@ function localHelp() {
   health        — HTTP GET /health  →  [HTTP /health]
   stat / stats  — то же, что health
   online        — HTTP GET /online (полный список из Redis)  →  [HTTP /online]
+  kick <uuid>   — HTTP POST /admin/kick (нужен ADMIN_TOKEN в env)
+  kickall       — HTTP POST /admin/kick-all
   url           — текущий WS URL
   reconnect     — новое WS-подключение
   quit          — выход (или Ctrl+C)
@@ -103,6 +105,94 @@ async function runOnline(wsUrl) {
 		console.log("[HTTP /online]", JSON.stringify(j, null, 2));
 	} catch (e) {
 		console.error("[HTTP /online] ошибка:", e.message);
+	}
+}
+
+async function runHealth(wsUrl) {
+	try {
+		const h = wsToHttpHealth(wsUrl);
+		const j = await httpGetJson(h);
+		console.log("[HTTP /health]", JSON.stringify(j, null, 2));
+	} catch (e) {
+		console.error("[HTTP /health] ошибка:", e.message);
+	}
+}
+
+function httpOriginFromWsUrl(wsUrl) {
+	const u = new URL(wsUrl);
+	const proto = u.protocol === "wss:" ? "https:" : "http:";
+	return `${proto}//${u.host}`;
+}
+
+function httpPostJson(urlStr, bodyObj, headers) {
+	const body = JSON.stringify(bodyObj);
+	const u = new URL(urlStr);
+	const isHttps = u.protocol === "https:";
+	const lib = isHttps ? require("https") : require("http");
+	const opts = {
+		hostname: u.hostname,
+		port: u.port || (isHttps ? 443 : 80),
+		path: `${u.pathname}${u.search}`,
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			"Content-Length": Buffer.byteLength(body),
+			...headers,
+		},
+	};
+	return new Promise((resolve, reject) => {
+		const req = lib.request(opts, (res) => {
+			let data = "";
+			res.on("data", (c) => (data += c));
+			res.on("end", () => {
+				try {
+					resolve({ status: res.statusCode, body: JSON.parse(data) });
+				} catch {
+					resolve({ status: res.statusCode, raw: data });
+				}
+			});
+		});
+		req.on("error", reject);
+		req.setTimeout(15000, () => {
+			req.destroy();
+			reject(new Error("timeout"));
+		});
+		req.write(body);
+		req.end();
+	});
+}
+
+async function runAdminKick(wsUrl, sessionId) {
+	const token = (process.env.ADMIN_TOKEN || "").trim();
+	if (!token) {
+		console.error("Задайте ADMIN_TOKEN в окружении");
+		return;
+	}
+	const url = `${httpOriginFromWsUrl(wsUrl)}/admin/kick`;
+	try {
+		const r = await httpPostJson(
+			url,
+			{ session_id: sessionId },
+			{ "X-Admin-Token": token },
+		);
+		console.log("[HTTP /admin/kick]", JSON.stringify(r, null, 2));
+	} catch (e) {
+		console.error("[HTTP /admin/kick] ошибка:", e.message);
+	}
+}
+
+async function runAdminKickAll(wsUrl) {
+	const token = (process.env.ADMIN_TOKEN || "").trim();
+	if (!token) {
+		console.error("Задайте ADMIN_TOKEN в окружении");
+		return;
+	}
+	const url = `${httpOriginFromWsUrl(wsUrl)}/admin/kick-all`;
+	try {
+		const r = await httpPostJson(url, {}, { "X-Admin-Token": token });
+		console.log("[HTTP /admin/kick-all]", JSON.stringify(r, null, 2));
+	} catch (e) {
+		console.error("[HTTP /admin/kick-all] ошибка:", e.message);
 	}
 }
 
@@ -150,7 +240,21 @@ function main() {
 	rl.prompt();
 
 	rl.on("line", async (line) => {
-		const cmd = line.trim().toLowerCase();
+		const raw = line.trim();
+		const low = raw.toLowerCase();
+		if (low === "kickall" || low === "kick-all") {
+			await runAdminKickAll(wsUrl);
+			rl.prompt();
+			return;
+		}
+		if (low.startsWith("kick ")) {
+			const sid = raw.slice(5).trim();
+			if (sid) await runAdminKick(wsUrl, sid);
+			else console.log("usage: kick <session_id>");
+			rl.prompt();
+			return;
+		}
+		const cmd = low;
 		switch (cmd) {
 			case "":
 				break;

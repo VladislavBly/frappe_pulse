@@ -17,7 +17,10 @@ services:
       REDIS_URL: redis://redis:6379
       PRESENCE_TENANT: "${PRESENCE_TENANT:-default}"
       PRESENCE_SERVICE_ID: "${PRESENCE_SERVICE_ID:-presence-ws}"
-      # Optional: enable kick / kickAll over WebSocket (see README)
+      # Frappe session verify before WebSocket upgrade (same secret as site_config pulse_presence_auth_secret):
+      # FRAPPE_PRESENCE_VERIFY_URL: "http://host.docker.internal:8000/api/pulse/internal/presence-ws-upgrade-verify"
+      # FRAPPE_PRESENCE_VERIFY_SECRET: "${PULSE_PRESENCE_AUTH_SECRET:-}"
+      # Optional: HTTP admin kick (POST /admin/kick, /admin/kick-all — header X-Admin-Token)
       # ADMIN_TOKEN: "long-random-secret"
     depends_on:
       - redis
